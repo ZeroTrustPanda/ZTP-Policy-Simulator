@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZeroTrustPanda ZS Policy Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Theme matches the ZeroTrustPanda ZS Policy Wizard */
+:root {
+  --bg-primary: #0a0e17; --bg-secondary: #111827; --bg-card: #1a2236; --bg-card-hover: #1f2943; --bg-input: #0f1629;
+  --border: #2a3654; --border-focus: #3b82f6; --text-primary: #e8ecf4; --text-secondary: #8896b3; --text-muted: #5c6b8a;
+  --accent-blue: #3b82f6; --accent-blue-dim: #1e40af; --accent-green: #10b981; --accent-green-dim: #065f46;
+  --accent-amber: #f59e0b; --accent-amber-dim: #78350f; --accent-red: #ef4444; --accent-red-dim: #7f1d1d;
+  --accent-purple: #8b5cf6; --accent-cyan: #06b6d4; --accent-slate: #64748b;
+  --radius: 8px; --radius-lg: 12px;
+  --mono: 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif; background: var(--bg-primary); color: var(--text-primary); min-height: 100vh; line-height: 1.55; }
+.app { display: flex; flex-direction: column; min-height: 100vh; }
+.header { background: var(--bg-secondary); border-bottom: 1px solid var(--border); padding: 0 2rem; height: 64px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+.header-brand { display: flex; align-items: center; gap: 12px; }
+.header-brand .logo { width: 36px; height: 36px; background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan)); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.header-brand h1 { font-size: 15px; font-weight: 600; background: linear-gradient(135deg, var(--text-primary), var(--accent-cyan)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.tag { font-size: 10px; padding: 2px 8px; border-radius: 4px; background: var(--accent-blue-dim); color: var(--accent-blue); font-weight: 600; letter-spacing: .5px; text-transform: uppercase; }
+.header-right { display: flex; align-items: center; gap: 10px; }
+.auth-badge { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+.auth-badge.connected { background: var(--accent-green-dim); color: var(--accent-green); }
+.auth-badge.disconnected { background: var(--accent-red-dim); color: var(--accent-red); }
+.auth-badge.info { background: var(--accent-blue-dim); color: #93c5fd; }
+.auth-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.main { flex: 1; display: flex; }
+.sidebar { width: 260px; background: var(--bg-secondary); border-right: 1px solid var(--border); padding: 1.5rem 0; flex-shrink: 0; }
+.sidebar-section { padding: 0 1rem; margin-bottom: 1.5rem; }
+.sidebar-section-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); padding: 0 .5rem; margin-bottom: 8px; }
+.sidebar-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius); cursor: pointer; font-size: 14px; color: var(--text-secondary); transition: all .15s; user-select: none; }
+.sidebar-item:hover { background: var(--bg-card); color: var(--text-primary); }
+.sidebar-item.active { background: var(--accent-blue-dim); color: #bfdbfe; font-weight: 500; }
+.sidebar-item.disabled { opacity: .45; cursor: not-allowed; }
+.sidebar-item.disabled:hover { background: none; color: var(--text-secondary); }
+.step-num { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; background: var(--bg-input); border: 1px solid var(--border); flex-shrink: 0; }
+.sidebar-item.active .step-num { background: var(--accent-blue); border-color: var(--accent-blue); color: #fff; }
+.sidebar-item.completed .step-num { background: var(--accent-green); border-color: var(--accent-green); color: #fff; }
+.sidebar-link { display: block; width: 100%; text-align: left; background: none; border: none; color: var(--text-secondary); font: inherit; font-size: 13px; padding: 7px 12px; border-radius: var(--radius); cursor: pointer; }
+.sidebar-link:hover:not(:disabled) { background: var(--bg-card); color: var(--text-primary); }
+.sidebar-link:disabled { opacity: .4; cursor: not-allowed; }
+.content { flex: 1; padding: 2rem 3rem 4rem; max-width: 1180px; min-width: 0; }
+.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1.5rem; margin-bottom: 1.25rem; }
+.card-header { margin-bottom: 1rem; }
+.card-header h2 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+.card-header h3 { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
+.card-header p { font-size: 14px; color: var(--text-secondary); }
+.section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin: 0 0 10px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+.span2 { grid-column: span 2; }
+.form-label { display: block; font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 6px; }
+.form-hint { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+input[type=text], input[type=password], select, textarea { width: 100%; padding: 10px 14px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); font-family: inherit; font-size: 14px; outline: none; transition: border-color .15s; }
+input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: .8; font-style: italic; }
+input:focus, select:focus, textarea:focus { border-color: var(--accent-blue); }
+textarea { resize: vertical; min-height: 72px; font-family: var(--mono); font-size: 12px; }
+select { cursor: pointer; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: var(--radius); font-family: inherit; font-size: 14px; font-weight: 500; cursor: pointer; border: 1px solid transparent; transition: all .15s; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-primary { background: var(--accent-blue); color: #fff; } .btn-primary:hover:not(:disabled) { background: #2563eb; }
+.btn-success { background: var(--accent-green); color: #fff; } .btn-success:hover:not(:disabled) { background: #059669; }
+.btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); } .btn-ghost:hover:not(:disabled) { border-color: var(--text-muted); color: var(--text-primary); }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+.btn-group { display: flex; gap: 8px; margin-top: 1.25rem; flex-wrap: wrap; align-items: center; }
+.msg { font-size: 13px; color: var(--text-secondary); }
+.err { color: #fca5a5; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius); font-size: 13px; font-weight: 500; cursor: pointer; user-select: none; transition: all .15s; color: var(--text-secondary); }
+.chip input { display: none; }
+.chip:hover { border-color: var(--text-muted); color: var(--text-primary); }
+.chip.on { border-color: var(--accent-blue); background: rgba(59,130,246,.15); color: #bfdbfe; }
+.opt { display: none; margin-top: 14px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-input); }
+.opt.on { display: block; }
+.opt input, .opt select, .opt textarea { background: var(--bg-secondary); }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .3px; white-space: nowrap; }
+.b-green { background: var(--accent-green-dim); color: #6ee7b7; } .b-red { background: var(--accent-red-dim); color: #fca5a5; }
+.b-amber { background: var(--accent-amber-dim); color: #fcd34d; } .b-blue { background: var(--accent-blue-dim); color: #bfdbfe; }
+.b-purple { background: rgba(139,92,246,.2); color: #c4b5fd; } .b-slate { background: #273349; color: var(--text-secondary); }
+.mono { font-family: var(--mono); font-size: 12px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; padding: 8px 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); font-weight: 600; color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+tr:hover td { background: var(--bg-card-hover); }
+.hero { border-radius: var(--radius-lg); padding: 1.5rem 1.75rem; margin-bottom: 1.25rem; border: 1px solid; display: flex; gap: 1.25rem; align-items: flex-start; }
+.hero .icon { font-size: 34px; line-height: 1; }
+.hero .verdict { font-size: 28px; font-weight: 700; letter-spacing: .5px; line-height: 1.1; }
+.hero .headline { font-size: 15px; margin-top: 6px; }
+.hero .ctx { font-size: 12px; color: var(--text-secondary); margin-top: 8px; font-family: var(--mono); word-break: break-all; }
+.hero.BLOCKED { background: linear-gradient(135deg, rgba(239,68,68,.22), rgba(127,29,29,.25)); border-color: rgba(239,68,68,.55); }
+.hero.BLOCKED .verdict { color: #fca5a5; }
+.hero.ALLOWED { background: linear-gradient(135deg, rgba(16,185,129,.18), rgba(6,95,70,.22)); border-color: rgba(16,185,129,.5); }
+.hero.ALLOWED .verdict { color: #6ee7b7; }
+.hero.BYPASSED { background: linear-gradient(135deg, rgba(100,116,139,.25), rgba(30,41,59,.4)); border-color: rgba(148,163,184,.45); }
+.hero.BYPASSED .verdict { color: #cbd5e1; }
+.hero.CONDITIONAL { background: linear-gradient(135deg, rgba(139,92,246,.2), rgba(76,29,149,.2)); border-color: rgba(139,92,246,.5); }
+.hero.CONDITIONAL .verdict { color: #c4b5fd; }
+.tiles { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 1.25rem; margin-bottom: 1.25rem; }
+.tile { border-radius: var(--radius-lg); padding: 1.4rem 1.5rem; border: 2px solid var(--border); background: var(--bg-card); min-width: 0; }
+.tile .t-title { font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 10px; }
+.tile .act { display: flex; align-items: center; gap: 12px; font-size: 34px; font-weight: 700; letter-spacing: .5px; line-height: 1; }
+.tile .act .ico { font-size: 30px; }
+.tile .mod-name { margin-top: 12px; font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--text-secondary); font-weight: 600; }
+.tile .rule-name { font-size: 20px; font-weight: 600; margin-top: 2px; word-break: break-word; }
+.tile .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+.tile .ctx { font-size: 12px; color: var(--text-secondary); margin-top: 12px; font-family: var(--mono); word-break: break-all; }
+.tile.BLOCK { border-color: rgba(239,68,68,.75); background: linear-gradient(160deg, rgba(239,68,68,.20), rgba(127,29,29,.18)); } .tile.BLOCK .act { color: #fca5a5; }
+.tile.ALLOW { border-color: rgba(16,185,129,.7); background: linear-gradient(160deg, rgba(16,185,129,.16), rgba(6,95,70,.18)); } .tile.ALLOW .act { color: #6ee7b7; }
+.tile.BYPASS { border-color: rgba(148,163,184,.6); background: linear-gradient(160deg, rgba(100,116,139,.24), rgba(30,41,59,.35)); } .tile.BYPASS .act { color: #e2e8f0; }
+.tile.ISOLATE { border-color: rgba(6,182,212,.7); background: linear-gradient(160deg, rgba(6,182,212,.18), rgba(14,116,144,.18)); } .tile.ISOLATE .act { color: #67e8f9; }
+.tile.CAUTION { border-color: rgba(245,158,11,.7); background: linear-gradient(160deg, rgba(245,158,11,.18), rgba(120,53,15,.2)); } .tile.CAUTION .act { color: #fcd34d; }
+.cond { display: grid; grid-template-columns: 26px minmax(0,1fr) auto; gap: 10px; align-items: start; padding: 10px 0; border-top: 1px solid var(--border); }
+.cond:first-of-type { border-top: none; padding-top: 2px; }
+.cond .ci { font-size: 16px; line-height: 1.4; }
+.cond .ct { font-size: 14px; font-weight: 500; word-break: break-word; }
+.cond .cr { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.cond .ca { display: flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--text-muted); }
+.b-cyan { background: rgba(6,182,212,.18); color: #67e8f9; }
+.more-btn { background: none; border: none; color: #93c5fd; font: inherit; font-size: 13px; cursor: pointer; padding: 8px 0 0; }
+.empty { color: var(--text-muted); font-size: 14px; }
+@media (max-width: 1000px) { .tiles { grid-template-columns: 1fr; } }
+.notes { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+.note { font-size: 12px; color: #fcd34d; }
+.decider { border: 2px solid var(--accent-red); background: rgba(239,68,68,.07); }
+.decider.allow { border-color: var(--accent-green); background: rgba(16,185,129,.06); }
+.decider.bypass { border-color: var(--accent-slate); background: rgba(100,116,139,.08); }
+.decider.cond { border-color: var(--accent-purple); background: rgba(139,92,246,.07); }
+.decider .module { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-secondary); font-weight: 600; }
+.decider .rule { font-size: 24px; font-weight: 600; margin: 4px 0 8px; word-break: break-word; }
+.decider .meta { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.crit { display: grid; grid-template-columns: 170px 90px 1fr; gap: 10px; padding: 7px 0; border-top: 1px dashed var(--border); font-size: 13px; }
+.crit .f { color: var(--text-secondary); }
+.st { font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .3px; }
+.st.match { color: #6ee7b7; } .st.nomatch { color: #fca5a5; } .st.unknown { color: #c4b5fd; } .st.any { color: var(--text-muted); }
+.mod { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 6px; background: var(--bg-input); }
+.mod > .hd { display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; font-size: 13px; }
+.mod > .hd .name { font-weight: 500; white-space: nowrap; }
+.mod > .hd .sub { flex: 1; color: var(--text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mod .bd { display: none; padding: 0 12px 10px; font-size: 13px; }
+.mod.open .bd { display: block; }
+.rule-box { padding: 10px 12px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); margin: 8px 0; }
+.rule-box .nm { font-weight: 600; }
+details > summary { cursor: pointer; color: var(--text-secondary); font-size: 12px; margin-top: 8px; }
+.outcome { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 2px 0; }
+.bar { background: var(--accent-blue); height: 8px; border-radius: 4px; }
+.spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent-blue); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.hidden { display: none !important; }
+@media (max-width: 900px) { .sidebar { display: none; } .content { padding: 1rem; } .span2 { grid-column: auto; } .crit { grid-template-columns: 1fr; } .header { padding: 0 1rem; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="header">
+    <div class="header-brand">
+      <div class="logo">🐼</div>
+      <div><h1>ZeroTrustPanda ZS Policy Simulator</h1></div>
+      <span class="tag" id="ver">v</span>
+    </div>
+    <div class="header-right">
+      <div class="auth-badge info hidden" id="loadedBadge"><span class="dot"></span><span id="loadedText"></span></div>
+      <div class="auth-badge disconnected" id="authBadge"><span class="dot"></span><span id="authText">Not connected</span></div>
+    </div>
+  </header>
+  <div class="main">
+    <aside class="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Steps</div>
+        <div class="sidebar-item active" data-step="1"><span class="step-num">1</span> Connect</div>
+        <div class="sidebar-item disabled" data-step="2"><span class="step-num">2</span> Load policies</div>
+        <div class="sidebar-item disabled" data-step="3"><span class="step-num">3</span> Simulate</div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Session</div>
+        <button class="sidebar-link" id="btnSaveSnap" disabled>💾 Save policy snapshot</button>
+        <button class="sidebar-link" id="btnOpenSnap">📂 Open saved snapshot…</button>
+        <button class="sidebar-link" id="btnDiag" disabled>🩺 Diagnostics</button>
+        <button class="sidebar-link" id="btnDisconnect" disabled>⏏ Disconnect</button>
+        <input type="file" id="snapFile" accept=".json" class="hidden">
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">About</div>
+        <div class="form-hint" style="padding:0 .5rem">Read-only. Credentials stay in memory on this machine and are never written to disk.</div>
+      </div>
+    </aside>
+    <main class="content">
+      <section id="step1">
+        <div class="card">
+          <div class="card-header"><h2>Connect to Zscaler</h2><p>OneAPI client credentials from ZIdentity. Used only to read policy and activity.</p></div>
+          <div class="grid">
+            <div><label class="form-label">Vanity domain</label><input type="text" id="vanity" placeholder="e.g. acme (acme.zslogin.net)" autocomplete="off"></div>
+            <div><label class="form-label">Client ID</label><input type="text" id="cid" autocomplete="off"></div>
+            <div><label class="form-label">Client secret</label><input type="password" id="csec" autocomplete="off"></div>
+            <div><label class="form-label">Cloud</label><select id="cloud"><option value="production">Production</option><option value="beta">Beta</option><option value="alpha">Alpha</option></select></div>
+            <div><label class="form-label">ZPA customer ID (optional)</label><input type="text" id="zpac" autocomplete="off"></div>
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-primary" id="btnConnect">Connect</button>
+            <button class="btn btn-ghost" id="btnDemo">Try with sample policies</button>
+            <span class="msg" id="connMsg"></span>
+          </div>
+          <div id="probeOut" style="margin-top:14px"></div>
+        </div>
+      </section>
+
+      <section id="step2" class="hidden">
+        <div class="card">
+          <div class="card-header"><h2>Load policies</h2><p>Pull the current rule sets to simulate against. Reload any time policy changes.</p></div>
+          <div class="section-title">Products</div>
+          <div class="chips" id="grpChips">
+            <label class="chip on"><input type="checkbox" class="grp" value="zia" checked>🌐 Internet Access (ZIA)</label>
+            <label class="chip on"><input type="checkbox" class="grp" value="zcc" checked>💻 Client Connector</label>
+            <label class="chip on" id="zpaChip"><input type="checkbox" class="grp" value="zpa" checked>🔒 Private Access (ZPA)</label>
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-primary" id="btnLoad">Load policies</button>
+            <button class="btn btn-success hidden" id="btnToSim">Continue to simulate →</button>
+            <span class="msg" id="loadMsg"></span>
+          </div>
+          <div id="loadTable" style="margin-top:16px"></div>
+        </div>
+      </section>
+
+      <section id="step3" class="hidden">
+        <div class="card">
+          <div class="card-header"><h2>Simulate a transaction</h2><p>Every field is optional. Leave Destination blank to ask "is this port or service blocked for everyone?"</p></div>
+          <div class="grid">
+            <div class="span2"><label class="form-label">Destination — URL, host, IP or CIDR (wildcards ok)</label><input type="text" id="target" placeholder="e.g. google.com, *.google.com, 10.0.2.0/24 — blank = any"></div>
+            <div><label class="form-label">Protocol</label><select id="protocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select></div>
+            <div><label class="form-label">Port</label><input type="text" id="port" placeholder="e.g. 443" inputmode="numeric"></div>
+            <div><label class="form-label">Network service</label><input type="text" id="networkService" placeholder="e.g. QUIC, RDP"></div>
+          </div>
+          <div class="section-title" style="margin-top:18px">Add details</div>
+          <div class="chips" id="secChips">
+            <label class="chip"><input type="checkbox" data-sec="secWho">👤 User / group / location</label>
+            <label class="chip"><input type="checkbox" data-sec="secWeb">📄 Web request (file, method, category)</label>
+            <label class="chip"><input type="checkbox" data-sec="secApp">🧩 Network application</label>
+            <label class="chip"><input type="checkbox" data-sec="secNet">🛰 Source IP / country</label>
+            <label class="chip"><input type="checkbox" data-sec="secFwd">🔀 Test bypass changes (PAC, lists)</label>
+          </div>
+          <div class="opt" id="secWho"><div class="grid">
+            <div><label class="form-label">User (name or email)</label><input type="text" id="user"></div>
+            <div><label class="form-label">Groups (looked up from ZIA if blank)</label><input type="text" id="groups" placeholder="comma-separated"></div>
+            <div><label class="form-label">Department</label><input type="text" id="department"></div>
+            <div><label class="form-label">Location</label><input type="text" id="location" list="locList"><datalist id="locList"></datalist></div>
+          </div></div>
+          <div class="opt" id="secWeb"><div class="grid">
+            <div><label class="form-label">File type extension</label><input type="text" id="fileType" placeholder="e.g. exe, docx, zip"></div>
+            <div><label class="form-label">File operation</label><select id="operation"><option value="">Not specified</option><option>DOWNLOAD</option><option>UPLOAD</option></select></div>
+            <div><label class="form-label">Request method</label><select id="method"><option value="">Auto (GET, or CONNECT if not decrypted)</option><option>GET</option><option>POST</option><option>PUT</option><option>HEAD</option><option>OPTIONS</option><option>DELETE</option><option>CONNECT</option><option>OTHER</option></select></div>
+            <div><label class="form-label">URL categories (override lookup)</label><input type="text" id="cats" placeholder="e.g. GAMBLING"></div>
+          </div></div>
+          <div class="opt" id="secApp"><div class="grid">
+            <div><label class="form-label">Application (overrides port inference)</label><input type="text" id="application" placeholder="e.g. QUIC, GOOGLE_DNS"></div>
+          </div></div>
+          <div class="opt" id="secNet"><div class="grid">
+            <div><label class="form-label">Source IP</label><input type="text" id="sourceIp" placeholder="e.g. 10.1.2.3"></div>
+            <div><label class="form-label">Destination country (ISO-2)</label><input type="text" id="destCountry" placeholder="e.g. US"></div>
+          </div></div>
+          <div class="opt" id="secFwd">
+            <div class="form-hint" style="margin:0 0 10px">Inclusions/exclusions, VPN gateway bypasses, app bypasses and PAC files are already read from every Client Connector app profile. Use these only to test changes you haven't made yet.</div>
+            <div class="grid">
+              <div style="grid-column:1/-1"><label class="form-label">PAC file contents</label><textarea id="pacText" placeholder="function FindProxyForURL(url, host) { ... }"></textarea></div>
+              <div><label class="form-label">Destination exclusions</label><textarea id="destExclusions" placeholder="one per line"></textarea></div>
+              <div><label class="form-label">Destination inclusions</label><textarea id="destInclusions"></textarea></div>
+              <div><label class="form-label">IPv4 exclusions</label><textarea id="ipExclusions"></textarea></div>
+              <div><label class="form-label">IPv4 inclusions</label><textarea id="ipInclusions"></textarea></div>
+              <div><label class="form-label">VPN gateway bypass</label><textarea id="vpnGateways"></textarea></div>
+            </div>
+          </div>
+          <div class="btn-group"><button class="btn btn-primary" id="btnSim">Simulate</button><span class="msg" id="simMsg"></span></div>
+        </div>
+        <div id="simOut"></div>
+      </section>
+
+      <section id="diagSec" class="hidden">
+        <div class="card">
+          <div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><div><h2>Diagnostics</h2><p>Every API call this session made.</p></div><button class="btn btn-ghost btn-sm" id="btnDiagClose">Close</button></div>
+          <div id="diagOut" class="msg"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let sid = null, demo = false, loaded = false, step = 1, lastSim = null;
+async function api(path, body) {
+  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ sessionId: sid }, body || {})) });
+  let j = {}; try { j = await r.json(); } catch {}
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+fetch('/api/version').then((r) => r.json()).then((j) => { $('ver').textContent = 'v' + j.version; }).catch(() => {});
+function msg(id, m, ok) { $(id).innerHTML = ok ? esc(m) : `<span class="err">${esc(m)}</span>`; }
+
+// ---------- steps ----------
+function canGo(n) { return n === 1 || (n === 2 && !!sid && !demo) || (n === 3 && loaded); }
+function go(n) {
+  if (!canGo(n)) return;
+  step = n;
+  for (const k of [1, 2, 3]) $('step' + k).classList.toggle('hidden', k !== n);
+  $('diagSec').classList.add('hidden');
+  refreshSidebar(); window.scrollTo({ top: 0 });
+}
+function refreshSidebar() {
+  document.querySelectorAll('.sidebar-item[data-step]').forEach((el) => {
+    const n = +el.dataset.step, done = (n === 1 && !!sid) || (n === 2 && loaded);
+    el.classList.toggle('active', n === step);
+    el.classList.toggle('disabled', !canGo(n));
+    el.classList.toggle('completed', done && n !== step);
+    el.querySelector('.step-num').textContent = done && n !== step ? '✓' : n;
+  });
+  $('btnSaveSnap').disabled = !loaded; $('btnDiag').disabled = !sid || demo; $('btnDisconnect').disabled = !sid;
+}
+document.querySelectorAll('.sidebar-item[data-step]').forEach((el) => el.onclick = () => go(+el.dataset.step));
+function setAuth(text, ok) { $('authText').textContent = text; $('authBadge').className = 'auth-badge ' + (ok ? 'connected' : 'disconnected'); }
+function setLoaded(snap) {
+  loaded = !!snap;
+  $('loadedBadge').classList.toggle('hidden', !snap);
+  if (snap) {
+    const total = Object.values(snap.counts || {}).reduce((a, b) => a + b, 0);
+    $('loadedText').textContent = `${total} policy objects · ${new Date(snap.loadedAt).toLocaleTimeString()}`;
+    $('locList').innerHTML = (snap.locations || []).map((l) => `<option value="${esc(l)}">`).join('');
+  }
+  refreshSidebar();
+}
+
+// ---------- chips ----------
+document.querySelectorAll('.chip').forEach((ch) => {
+  const cb = ch.querySelector('input');
+  ch.addEventListener('click', (ev) => { ev.preventDefault(); cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); });
+  cb.addEventListener('change', () => ch.classList.toggle('on', cb.checked));
+});
+
+// ---------- step 1 ----------
+function probeHtml(p) {
+  return Object.entries(p || {}).map(([k, x]) => `<span class="badge ${x.ok ? 'b-green' : 'b-red'}" style="margin-right:6px">${esc(k)} ${x.ok ? '✓ reachable' : '✗ ' + esc(x.status || 'error')}</span>`).join('')
+    + Object.entries(p || {}).filter(([, x]) => !x.ok).map(([k, x]) => `<div class="note" style="margin-top:6px">${esc(k)}: ${esc(x.error)}</div>`).join('');
+}
+$('btnConnect').onclick = async () => {
+  $('btnConnect').disabled = true; $('connMsg').innerHTML = '<span class="spinner"></span> Authenticating…'; $('probeOut').innerHTML = '';
+  try {
+    const j = await api('/api/connect', { vanityDomain: $('vanity').value.trim(), clientId: $('cid').value.trim(), clientSecret: $('csec').value, cloud: $('cloud').value, zpaCustomerId: $('zpac').value.trim() });
+    sid = j.sessionId; demo = false; $('csec').value = '';
+    setAuth('Connected · ' + $('vanity').value.trim(), true);
+    $('probeOut').innerHTML = probeHtml(j.probe) + `<div class="form-hint" style="margin-top:8px">Token: ${esc(j.tokenHost)} · API: ${esc(j.apiHost)}</div>`;
+    $('zpaChip').classList.toggle('hidden', !(j.catalog || []).some((c) => c.group === 'zpa'));
+    const zpaCb = $('zpaChip').querySelector('input'); if ($('zpaChip').classList.contains('hidden')) { zpaCb.checked = false; }
+    for (const g of document.querySelectorAll('.grp')) { const n = { zia: 'ZIA', zcc: 'ZCC', zpa: 'ZPA' }[g.value]; if (j.probe && j.probe[n] && !j.probe[n].ok) g.checked = false; g.parentNode.classList.toggle('on', g.checked); }
+    $('connMsg').textContent = '';
+    setLoaded(null); $('loadTable').innerHTML = ''; $('btnToSim').classList.add('hidden'); $('loadMsg').textContent = ''; $('btnLoad').textContent = 'Load policies';
+    go(2);
+  } catch (e) { msg('connMsg', e.message); }
+  $('btnConnect').disabled = false;
+};
+$('btnDemo').onclick = async () => {
+  try { const j = await api('/api/connect', { demo: true }); sid = j.sessionId; demo = true; setAuth('Sample policies', true); setLoaded(j.snapshot); go(3); }
+  catch (e) { msg('connMsg', e.message); }
+};
+$('btnDisconnect').onclick = async () => {
+  try { await api('/api/disconnect'); } catch {}
+  sid = null; demo = false; setAuth('Not connected', false); setLoaded(null); $('simOut').innerHTML = ''; go(1);
+};
+$('btnOpenSnap').onclick = () => $('snapFile').click();
+$('snapFile').onchange = async () => {
+  const f = $('snapFile').files[0]; if (!f) return;
+  try { const j = await api('/api/snapshot/open', { snapshot: JSON.parse(await f.text()) }); sid = j.sessionId; demo = true; setAuth('Offline snapshot · ' + (j.tenant || f.name), true); setLoaded(j.snapshot); go(3); }
+  catch (e) { go(1); msg('connMsg', e.message); }
+  $('snapFile').value = '';
+};
+$('btnSaveSnap').onclick = async () => {
+  const target = step === 3 ? 'simMsg' : 'loadMsg';
+  try { const j = await api('/api/snapshot/save'); msg(target, `Snapshot saved to ${j.file}`, true); } catch (e) { msg(target, e.message); }
+};
+
+// ---------- step 2 ----------
+function renderJob(job) {
+  const icon = { ok: '<span class="badge b-green">loaded</span>', error: '<span class="badge b-red">failed</span>', loading: '<span class="spinner"></span>', pending: '<span class="badge b-slate">waiting</span>' };
+  const rows = Object.values(job.items || {}).map((x) => `<tr><td>${esc(x.label)}</td><td>${icon[x.state] || esc(x.state)}</td><td style="text-align:right">${x.count != null ? esc(x.count) : ''}</td><td><span class="form-hint">${esc(x.error || '')}</span></td></tr>`).join('');
+  $('loadTable').innerHTML = rows ? `<table><tr><th>Policy set</th><th>Status</th><th style="text-align:right">Objects</th><th>Detail</th></tr>${rows}</table>` : '';
+}
+$('btnLoad').onclick = async () => {
+  const groups = [...document.querySelectorAll('.grp:checked')].map((c) => c.value);
+  if (!groups.length) { msg('loadMsg', 'Pick at least one product.'); return; }
+  $('btnLoad').disabled = true; $('btnToSim').classList.add('hidden'); $('loadMsg').innerHTML = '<span class="spinner"></span> Loading policies…';
+  try {
+    await api('/api/load', { groups });
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 700));
+      const st = await api('/api/load-status');
+      if (st.job) renderJob(st.job);
+      if (st.job && st.job.done) {
+        const items = Object.values(st.job.items || {}), bad = items.filter((i) => i.state === 'error').length;
+        $('loadMsg').innerHTML = st.job.error ? `<span class="err">${esc(st.job.error)}</span>` : `Loaded ${items.length - bad} of ${items.length} policy sets.` + (bad ? ` <span class="err">${bad} failed — those checks will show as not evaluated.</span>` : '');
+        setLoaded(st.snapshot); $('btnToSim').classList.remove('hidden'); break;
+      }
+    }
+  } catch (e) { msg('loadMsg', e.message); }
+  $('btnLoad').disabled = false; $('btnLoad').textContent = 'Reload policies';
+};
+$('btnToSim').onclick = () => go(3);
+
+// ---------- step 3: form ----------
+(function initSections() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('ztp-sim.sections') || '{}'); } catch {}
+  document.querySelectorAll('#secChips input[data-sec]').forEach((cb) => {
+    cb.checked = !!saved[cb.dataset.sec];
+    cb.parentNode.classList.toggle('on', cb.checked);
+    $(cb.dataset.sec).classList.toggle('on', cb.checked);
+    cb.addEventListener('change', () => {
+      $(cb.dataset.sec).classList.toggle('on', cb.checked);
+      saved[cb.dataset.sec] = cb.checked;
+      try { localStorage.setItem('ztp-sim.sections', JSON.stringify(saved)); } catch {}
+    });
+  });
+})();
+function vis(id) { const el = $(id); const sec = el && el.closest('.opt'); return !sec || sec.classList.contains('on'); }
+function v(id) { return vis(id) ? $(id).value.trim() : ''; }
+function list(id, up) { return v(id).split(',').map((x) => (up ? x.trim().toUpperCase() : x.trim())).filter(Boolean); }
+function formBody() {
+  return {
+    target: v('target'), port: v('port'), protocol: $('protocol').value, networkService: v('networkService'),
+    fileType: v('fileType'), operation: v('operation'), method: v('method'), categories: list('cats', true), application: v('application'),
+    user: v('user'), groups: list('groups'), department: v('department'), location: v('location'), sourceIp: v('sourceIp'), destCountry: v('destCountry'),
+    manual: vis('pacText') ? { pacText: $('pacText').value, destExclusions: $('destExclusions').value, destInclusions: $('destInclusions').value, ipExclusions: $('ipExclusions').value, ipInclusions: $('ipInclusions').value, vpnGateways: $('vpnGateways').value } : {},
+  };
+}
+document.querySelectorAll('#step3 input[type=text]').forEach((el) => el.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btnSim').click(); }));
+
+// ---------- step 3: results ----------
+const VERDICT = { BLOCKED: ['⛔', 'BLOCKED'], ALLOWED: ['✅', 'ALLOWED'], BYPASSED: ['↪️', 'BYPASSED'], CONDITIONAL: ['❔', 'DEPENDS ON CONTEXT'] };
+function badgeFor(x) {
+  const m = { BLOCK: 'b-red', CONDITIONAL_BLOCK: 'b-red', ALLOW: 'b-green', DECRYPTED: 'b-green', VIA_ZSCALER: 'b-green', INSPECT_ONLY: 'b-blue', DEFAULT: 'b-slate', NOT_DECRYPTED: 'b-amber', BYPASSES_ZSCALER: 'b-slate', BYPASS: 'b-slate', DEPENDS_ON_PROFILE: 'b-purple', 'N/A': 'b-slate', NOT_A_ZPA_APP: 'b-slate' };
+  const k = String(x || '');
+  const cls = m[k] || (/BLOCK|DROP|RESET|DENY/.test(k) ? 'b-red' : /ALLOW/.test(k) ? 'b-green' : 'b-slate');
+  return `<span class="badge ${cls}">${esc(k.replace(/_/g, ' '))}</span>`;
+}
+function crits(l) { return (l || []).map((c) => `<div class="crit"><span class="f">${esc(c.field)}</span><span class="st ${esc(c.status)}">${esc(c.status)}</span><span>${esc(c.detail)}</span></div>`).join(''); }
+function ruleBox(r, tag) {
+  return `<div class="rule-box"><div><span class="nm">${esc(r.name)}</span> ${r.order != null && r.order >= 0 ? `<span class="badge b-slate">order ${esc(r.order)}</span>` : ''} ${r.action ? badgeFor(r.action) : ''} ${tag ? `<span class="badge b-purple">${esc(tag)}</span>` : ''}</div>${crits(r.criteria)}${r.engines && r.engines.length ? `<div class="form-hint">DLP engines: ${esc(r.engines.join(', '))}</div>` : ''}</div>`;
+}
+const ACT = { BLOCK: ['⛔', 'BLOCK', 'b-red'], ALLOW: ['✅', 'ALLOW', 'b-green'], BYPASS: ['↪', 'BYPASS', 'b-slate'], ISOLATE: ['🧪', 'ISOLATE', 'b-cyan'], CAUTION: ['⚠️', 'CAUTION', 'b-amber'] };
+const KIND_ICON = { identity: '👥', location: '📍', other: '⏱', zcc: '💻', content: '📄', input: '✏️', zia: '🌐' };
+function actBadge(a) { const x = ACT[a] || ['•', a, 'b-slate']; return `<span class="badge ${x[2]}">${x[0]} ${esc(x[1])}</span>`; }
+function actionTile(s, c, modules) {
+  const p = s.primary, [ico, word] = ACT[p.action] || ['•', p.action];
+  const ctx = [c.target ? (c.target.raw || c.target.host) : 'any destination', c.port != null ? (c.protocol || 'tcp').toUpperCase() + '/' + c.port : '', (c.categories || []).join(', '), (c.resolvedIps || []).slice(0, 2).join(', '), (c.groups || []).length ? 'groups: ' + c.groups.join(', ') : ''].filter(Boolean).map(esc).join(' · ');
+  const tags = (p.tags || []).map((t) => `<span class="badge ${t.tag === 'NOT_INSPECTED' ? 'b-amber' : 'b-blue'}" title="${esc(t.text)}">${t.tag === 'NOT_INSPECTED' ? '🔓 Not inspected' : '🔍 Inspect only'}</span>`).join('');
+  const tagText = (p.tags || []).map((t) => `<div class="form-hint">${esc(t.text)}</div>`).join('');
+  const why = (p.criteria || []).length ? `<details><summary>Why this rule matched</summary>${crits(p.criteria)}</details>` : '';
+  const allowed = p.action === 'ALLOW' && (s.allowedBy || []).length ? `<details><summary>Rule that decided in each module</summary><table style="margin-top:6px">${s.allowedBy.map((a) => `<tr><td>${esc(a.module)}</td><td>${a.rule ? esc(a.rule) : `<span class="form-hint">default</span>`}</td><td>${badgeFor(a.action)}</td></tr>`).join('')}</table></details>` : '';
+  const notes = [...(c.notes || []), ...s.lines.filter((l) => /assumed/i.test(l))].map((n) => `<div class="note">${esc(n)}</div>`).join('');
+  return `<div class="tile ${esc(p.action)}"><div class="t-title">Policy rule action</div>
+    <div class="act"><span class="ico">${ico}</span>${esc(word)}</div>
+    <div class="mod-name">${esc(p.module)}</div>
+    <div class="rule-name">${p.rule ? esc(p.rule) : `<span class="empty">${esc(p.reason || 'no rule matched — default action')}</span>`}${p.order != null && p.order >= 0 ? ` <span class="badge b-slate" style="vertical-align:3px">order ${esc(p.order)}</span>` : ''}</div>
+    ${tags ? `<div class="tags">${tags}</div>${tagText}` : ''}
+    <div class="ctx">${ctx}</div>
+    ${notes ? `<div class="notes">${notes}</div>` : ''}
+    ${why}${allowed}</div>`;
+}
+function basedOnTile(s, c) {
+  const conds = s.alsoBasedOn || [];
+  const row = (x) => `<div class="cond"><span class="ci">${KIND_ICON[x.kind] || '•'}</span><div><div class="ct">${esc(x.condition)}</div><div class="cr">${x.rule ? `rule "${esc(x.rule)}"${x.order != null && x.order >= 0 ? ' · order ' + esc(x.order) : ''} · ${esc(x.module)}` : esc(x.detail || x.module || '')}</div></div><div class="ca">→ ${actBadge(x.action)}</div></div>`;
+  const noUser = !(c.user || (c.groups || []).length);
+  const body = conds.length
+    ? conds.slice(0, 3).map(row).join('') + (conds.length > 3 ? `<div class="more hidden">${conds.slice(3).map(row).join('')}</div><button class="more-btn" onclick="this.previousElementSibling.classList.toggle('hidden'); this.textContent = this.textContent.startsWith('Show') ? 'Show less' : 'Show ${conds.length - 3} more'">Show ${conds.length - 3} more</button>` : '')
+    : `<div class="empty">Nothing else changes this result${noUser ? ' — it applies to every user, location and app profile' : ''}.</div>`;
+  return `<div class="tile"><div class="t-title">Policy action also based on</div>${body}</div>`;
+}
+function candidatesCard(s, modules) {
+  const d = modules.find((m) => m.module === 'Data Loss Prevention');
+  if (!d || !(d.candidates || []).length || s.primary.action === 'BYPASS' || (s.primary.action === 'BLOCK' && s.primary.module !== d.module)) return '';
+  return `<div class="card"><div class="card-header"><h3>📄 Content inspection</h3><p style="font-size:13px">${esc(d.note || '')}</p></div>${d.candidates.map((r) => ruleBox(r)).join('')}</div>`;
+}
+function forwardingCard(fw, s) {
+  const ssl = (s.bypasses || []).filter((b) => b.kind === 'ssl');
+  const sslNote = ssl.length ? `<div class="note" style="margin-top:12px">🔓 SSL inspection bypassed — ${esc(ssl[0].how)}. URL-path, file type, sandbox, DLP and ATP content checks can't see inside it.</div>` : '';
+  if (!fw || !(fw.profiles || []).length) return sslNote ? `<div class="card"><div class="card-header"><h3>Inspection</h3></div>${sslNote}</div>` : '';
+  const oc = (o) => `<div class="outcome">${o.outcome === 'ZIA' ? '<span class="badge b-green">via Zscaler</span>' : o.outcome === 'NOT_CAPTURED' ? '<span class="badge b-amber">not captured</span>' : '<span class="badge b-slate">bypassed</span>'}<span>${esc(o.how)}</span>${o.nets && !['—', 'All networks'].includes(o.nets[0]) ? `<span class="form-hint" style="margin:0">${esc(o.nets.join(', '))}</span>` : ''}</div>`;
+  const rows = fw.profiles.map((p) => `<tr style="${p.applies === 'no' ? 'opacity:.5' : ''}"><td><b>${esc(p.name)}</b><div class="form-hint">${esc([p.platform, p.forwardingProfile ? 'forwarding: ' + p.forwardingProfile : 'no forwarding profile linked'].filter(Boolean).join(' · '))}</div></td>
+    <td>${esc(p.appliesTo)}${p.applies === 'no' ? '<div class="form-hint">not this user</div>' : ''}</td>
+    <td>${p.outcomes.map(oc).join('')}${p.outcomes.some((o) => (o.steps || []).length) ? `<details><summary>details</summary>${[...new Set(p.outcomes.flatMap((o) => o.steps || []))].map((x) => `<div class="form-hint">${esc(x)}</div>`).join('')}</details>` : ''}</td></tr>`).join('');
+  return `<div class="card"><div class="card-header"><h3>How it gets there — Client Connector &amp; bypasses</h3><p style="font-size:13px">${esc(fw.reason)}</p></div>
+    <table><tr><th style="width:28%">App profile</th><th style="width:18%">Applies to</th><th>Outcome by network type</th></tr>${rows}</table>${sslNote}</div>`;
+}
+function modulesCard(modules, s) {
+  const dec = s.decider && s.decider.module;
+  const items = modules.filter((m) => !m.module.startsWith('Forwarding')).map((m) => {
+    const isDec = m.module === dec && s.overall !== 'ALLOWED';
+    const sub = m.decidingRule ? `rule "${m.decidingRule.name}"` : m.reason;
+    return `<div class="mod"><div class="hd" onclick="this.parentNode.classList.toggle('open')"><span class="name">${esc(m.module)}</span>${isDec ? '<span class="badge b-blue">decides</span>' : ''}<span class="sub">${esc(sub || '')}</span>${m.confidence && m.confidence !== 'definite' ? `<span class="badge b-purple">${esc(m.confidence)}</span>` : ''}${badgeFor(m.verdict)}</div>
+      <div class="bd"><div class="msg">${esc(m.reason)}</div>${m.note ? `<div class="note" style="margin-top:6px">${esc(m.note)}</div>` : ''}${(m.matchedSegments || []).length ? `<div class="form-hint">Matched segment(s): ${m.matchedSegments.map((x) => esc(x.name)).join(', ')}</div>` : ''}
+      ${m.decidingRule ? ruleBox(m.decidingRule, 'deciding') : ''}${(m.couldOverride || []).map((r) => ruleBox(r, 'unresolved')).join('')}
+      ${(m.rules || []).length ? `<details><summary>All ${m.rules.length} evaluated rule(s)</summary>${m.rules.map((r) => ruleBox(r, r.status)).join('')}</details>` : ''}</div></div>`;
+  }).join('');
+  return `<div class="card"><div class="card-header"><h3>Every module</h3><p style="font-size:13px">Click a module for its rules.</p></div>${items}</div>`;
+}
+$('btnSim').onclick = async () => {
+  if (!sid || !loaded) { msg('simMsg', 'Connect and load policies first.'); return; }
+  $('btnSim').disabled = true; $('simMsg').innerHTML = '<span class="spinner"></span> Evaluating…';
+  try {
+    const body = formBody();
+    const j = await api('/api/simulate', body);
+    lastSim = { body, result: j };
+    const s = j.summary, c = j.context;
+    const errs = Object.keys((j.snapshot && j.snapshot.errors) || {});
+    $('simOut').innerHTML = (errs.length ? `<div class="note" style="margin-bottom:10px">Not evaluated (failed to load): ${errs.map(esc).join(', ')}</div>` : '')
+      + `<div class="tiles">${actionTile(s, c, j.modules)}${basedOnTile(s, c)}</div>`
+      + forwardingCard(j.modules.find((m) => m.module.startsWith('Forwarding')), s) + modulesCard(j.modules, s);
+    $('simMsg').textContent = '';
+  } catch (e) { msg('simMsg', e.message); }
+  $('btnSim').disabled = false;
+};
+
+// ---------- diagnostics ----------
+$('btnDiag').onclick = async () => {
+  for (const k of [1, 2, 3]) $('step' + k).classList.add('hidden');
+  $('diagSec').classList.remove('hidden');
+  try {
+    const d = await api('/api/diagnostics');
+    $('diagOut').innerHTML = `<div style="margin-bottom:8px">Token host <span class="mono">${esc(d.tokenHost)}</span> · API host <span class="mono">${esc(d.apiHost)}</span></div><table><tr><th>Time</th><th>Call</th><th>Status</th><th>Error</th></tr>${d.log.slice().reverse().map((l) => `<tr><td>${esc(new Date(l.t).toLocaleTimeString())}</td><td class="mono">${esc(l.method)} ${esc(l.url)}</td><td>${esc(l.status)}</td><td><span class="form-hint">${esc(l.err)}</span></td></tr>`).join('')}</table>`;
+  } catch (e) { $('diagOut').textContent = e.message; }
+};
+$('btnDiagClose').onclick = () => go(step);
+refreshSidebar();
+</script>
+</body>
+</html>

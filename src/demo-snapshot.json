@@ -1,0 +1,464 @@
+{
+ "urlFilteringRules": [
+  {
+   "id": 1,
+   "name": "Block Gambling and Adult",
+   "order": 1,
+   "rank": 7,
+   "state": "ENABLED",
+   "action": "BLOCK",
+   "protocols": [
+    "ANY_RULE"
+   ],
+   "urlCategories": [
+    "GAMBLING",
+    "ADULT_THEMES"
+   ]
+  },
+  {
+   "id": 2,
+   "name": "Block Social for Guests",
+   "order": 2,
+   "rank": 7,
+   "state": "ENABLED",
+   "action": "BLOCK",
+   "protocols": [
+    "ANY_RULE"
+   ],
+   "urlCategories": [
+    "SOCIAL_NETWORKING"
+   ],
+   "groups": [
+    {
+     "id": 11,
+     "name": "Guests"
+    }
+   ]
+  },
+  {
+   "id": 3,
+   "name": "Block Custom Denylist",
+   "order": 3,
+   "rank": 7,
+   "state": "ENABLED",
+   "action": "BLOCK",
+   "protocols": [
+    "ANY_RULE"
+   ],
+   "urlCategories": [
+    "CUSTOM_01"
+   ]
+  },
+  {
+   "id": 4,
+   "name": "Allow Everything Else",
+   "order": 4,
+   "rank": 7,
+   "state": "ENABLED",
+   "action": "ALLOW",
+   "protocols": [
+    "ANY_RULE"
+   ],
+   "urlCategories": [
+    "ANY"
+   ]
+  }
+ ],
+ "firewallRules": [
+  {
+   "id": 21,
+   "name": "Block RDP Outbound",
+   "order": 1,
+   "rank": 7,
+   "state": "ENABLED",
+   "action": "BLOCK_DROP",
+   "nwServices": [
+    {
+     "id": 301,
+     "name": "RDP"
+    }
+   ]
+  },
+  {
+   "id": 22,
+   "name": "Block SMB to Internet",
+   "order": 2,
+   "rank": 7,
+   "state": "ENABLED",
+   "action": "BLOCK_RESET",
+   "nwServices": [
+    {
+     "id": 302,
+     "name": "SMB"
+    }
+   ],
+   "destIpGroups": [
+    {
+     "id": 401,
+     "name": "Public Internet"
+    }
+   ]
+  },
+  {
+   "id": 23,
+   "name": "Allow Lab Subnet",
+   "order": 3,
+   "rank": 7,
+   "state": "ENABLED",
+   "action": "ALLOW",
+   "destAddresses": [
+    "10.0.2.0/24"
+   ]
+  },
+  {
+   "id": 24,
+   "name": "Default Allow",
+   "order": 4,
+   "rank": 7,
+   "state": "ENABLED",
+   "action": "ALLOW"
+  }
+ ],
+ "dnsRules": [
+  {
+   "id": 31,
+   "name": "Block DoH Providers",
+   "order": 1,
+   "rank": 7,
+   "state": "ENABLED",
+   "action": "BLOCK",
+   "applications": [
+    "GOOGLE_DNS",
+    "CLOUDFLARE_DNS"
+   ]
+  },
+  {
+   "id": 32,
+   "name": "Block Newly Registered Domains",
+   "order": 2,
+   "rank": 7,
+   "state": "ENABLED",
+   "action": "BLOCK",
+   "destAddresses": [
+    "*.badzone.example"
+   ]
+  }
+ ],
+ "sandboxRules": [
+  {
+   "id": 41,
+   "name": "Sandbox Executables and Archives",
+   "order": 1,
+   "rank": 7,
+   "state": "ENABLED",
+   "baRuleAction": "BLOCK",
+   "fileTypes": [
+    "FTCATEGORY_EXE",
+    "FTCATEGORY_ZIP"
+   ],
+   "urlCategories": [
+    "ANY"
+   ],
+   "protocols": [
+    "ANY_RULE"
+   ]
+  }
+ ],
+ "fileTypeRules": [
+  {
+   "id": 51,
+   "name": "Block Executable Downloads",
+   "order": 1,
+   "rank": 7,
+   "state": "ENABLED",
+   "filteringAction": "BLOCK",
+   "operation": "DOWNLOAD",
+   "fileTypes": [
+    "FTCATEGORY_EXE",
+    "FTCATEGORY_MSI"
+   ]
+  },
+  {
+   "id": 52,
+   "name": "Block ISO Anywhere",
+   "order": 2,
+   "rank": 7,
+   "state": "ENABLED",
+   "filteringAction": "BLOCK",
+   "fileTypes": [
+    "FTCATEGORY_ISO"
+   ]
+  }
+ ],
+ "webDlpRules": [
+  {
+   "id": 61,
+   "name": "PHI Upload Block",
+   "order": 1,
+   "rank": 7,
+   "state": "ENABLED",
+   "action": "BLOCK",
+   "dlpEngines": [
+    {
+     "id": 1,
+     "name": "HIPAA PHI"
+    }
+   ],
+   "urlCategories": [
+    "ANY"
+   ],
+   "fileTypes": [
+    "ANY"
+   ]
+  }
+ ],
+ "sslRules": [
+  {
+   "id": 71,
+   "name": "Do Not Decrypt Healthcare",
+   "order": 1,
+   "rank": 7,
+   "state": "ENABLED",
+   "action": {
+    "type": "DO_NOT_DECRYPT"
+   },
+   "urlCategories": [
+    "HEALTH"
+   ]
+  },
+  {
+   "id": 72,
+   "name": "Decrypt All",
+   "order": 2,
+   "rank": 7,
+   "state": "ENABLED",
+   "action": {
+    "type": "DECRYPT"
+   }
+  }
+ ],
+ "atpSettings": {
+  "riskTolerance": 70,
+  "malwareSitesBlocked": true,
+  "knownPhishingSitesBlocked": true,
+  "cmdCtlServerBlocked": true,
+  "cryptoMiningBlocked": true,
+  "anonymizerBlocked": false,
+  "blockedCountries": [
+   "COUNTRY_KP"
+  ]
+ },
+ "atpMaliciousUrls": {
+  "maliciousUrls": [
+   ".evil-denylist.example"
+  ]
+ },
+ "atpSecurityExceptions": {
+  "bypassUrls": [
+   "trusted.partner.example"
+  ]
+ },
+ "customUrlCategories": [
+  {
+   "id": "CUSTOM_01",
+   "configuredName": "Corporate Denylist",
+   "urls": [
+    ".blocked-corp.example",
+    "files.sketchy.example"
+   ],
+   "ipRanges": [
+    "203.0.113.0/24"
+   ]
+  }
+ ],
+ "networkServices": [
+  {
+   "id": 301,
+   "name": "RDP",
+   "tag": "OTHER_NETWORK_SERVICE",
+   "destTcpPorts": [
+    {
+     "start": 3389,
+     "end": 3389
+    }
+   ]
+  },
+  {
+   "id": 302,
+   "name": "SMB",
+   "tag": "SMB",
+   "destTcpPorts": [
+    {
+     "start": 445,
+     "end": 445
+    },
+    {
+     "start": 139,
+     "end": 139
+    }
+   ]
+  }
+ ],
+ "networkServiceGroups": [],
+ "ipDestinationGroups": [
+  {
+   "id": 401,
+   "name": "Public Internet",
+   "type": "DSTN_IP",
+   "addresses": [
+    "0.0.0.0-9.255.255.255",
+    "11.0.0.0-172.15.255.255",
+    "172.32.0.0-192.167.255.255",
+    "192.169.0.0-255.255.255.255"
+   ]
+  }
+ ],
+ "ipSourceGroups": [],
+ "locations": [
+  {
+   "id": 1,
+   "name": "HQ"
+  },
+  {
+   "id": 2,
+   "name": "Road Warrior"
+  }
+ ],
+ "zccPolicies": [
+  {
+   "id": 101,
+   "name": "Corp Windows",
+   "_platform": "Windows",
+   "ruleOrder": 1,
+   "active": "1",
+   "groupAll": 1,
+   "onNetPolicy": {
+    "id": "1",
+    "name": "Windows Tunnel 2.0"
+   },
+   "pac_url": "",
+   "policyExtension": {
+    "packetTunnelExcludeList": "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
+    "packetTunnelIncludeList": "0.0.0.0/0",
+    "packetTunnelDnsExcludeList": "intranet.corp.example,*.zoom.us",
+    "packetTunnelDnsIncludeList": "",
+    "vpnGateways": "vpn.corp.example",
+    "sourcePortBasedBypasses": "3389:*"
+   },
+   "appServiceIds": [
+    3
+   ]
+  },
+  {
+   "id": 102,
+   "name": "Corp macOS",
+   "_platform": "macOS",
+   "ruleOrder": 1,
+   "active": "1",
+   "groupAll": 1,
+   "onNetPolicy": {
+    "id": "2",
+    "name": "Mac Local Proxy"
+   },
+   "pac_url": "",
+   "policyExtension": {
+    "packetTunnelExcludeList": "10.0.0.0/8",
+    "packetTunnelIncludeList": "0.0.0.0/0",
+    "vpnGateways": ""
+   }
+  }
+ ],
+ "zccForwardingProfiles": [
+  {
+   "id": "1",
+   "name": "Windows Tunnel 2.0",
+   "forwardingProfileActions": [
+    {
+     "networkType": 0,
+     "actionType": 0
+    },
+    {
+     "networkType": 2,
+     "actionType": 1,
+     "enablePacketTunnel": 1
+    }
+   ]
+  },
+  {
+   "id": "2",
+   "name": "Mac Local Proxy",
+   "forwardingProfileActions": [
+    {
+     "networkType": 2,
+     "actionType": 2,
+     "enablePacketTunnel": 0,
+     "customPac": "function FindProxyForURL(url, host) { if (isInNet(host, '10.0.0.0', '255.0.0.0')) return 'DIRECT'; if (dnsDomainIs(host, '.internal.example')) return 'DIRECT'; return 'PROXY ${GATEWAY}:80'; }"
+    }
+   ]
+  }
+ ],
+ "zpaApps": [
+  {
+   "id": "9001",
+   "name": "Radiology PACS",
+   "domainNames": [
+    "pacs.hospital.example",
+    "*.pacs.hospital.example"
+   ],
+   "tcpPortRanges": [
+    "104",
+    "104",
+    "11112",
+    "11112"
+   ],
+   "segmentGroupId": "500",
+   "enabled": true
+  }
+ ],
+ "zpaSegmentGroups": [
+  {
+   "id": "500",
+   "name": "Imaging"
+  }
+ ],
+ "zpaAccessRules": [
+  {
+   "id": "8001",
+   "name": "Allow Radiologists to PACS",
+   "ruleOrder": "1",
+   "action": "ALLOW",
+   "conditions": [
+    {
+     "operator": "OR",
+     "operands": [
+      {
+       "objectType": "APP_GROUP",
+       "values": [
+        "500"
+       ]
+      }
+     ]
+    },
+    {
+     "operator": "OR",
+     "operands": [
+      {
+       "objectType": "SCIM_GROUP",
+       "lhs": "123",
+       "rhs": "456"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "zccAppServices": [
+  {
+   "id": 3,
+   "appName": "Microsoft Teams",
+   "ips": [
+    "52.112.0.0/14"
+   ]
+  }
+ ]
+}
