@@ -7,10 +7,12 @@ Companion to the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustP
 ## Downloads
 | Platform | File |
 |---|---|
-| Windows x64 | `ZTP-Policy-Simulator-1.1.0-windows-x64.zip` → `ZTP-Policy-Simulator.exe` |
-| macOS Apple Silicon | `ZTP-Policy-Simulator-1.1.0-macos-arm64.zip` |
-| macOS Intel | `ZTP-Policy-Simulator-1.1.0-macos-x64.zip` |
-| Source | `ZTP-Policy-Simulator-1.1.0-source.tar.gz` (or clone the repo) |
+| Windows x64 | [ZTP-Policy-Simulator-1.1.0-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.1.0/ZTP-Policy-Simulator-1.1.0-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
+| macOS Apple Silicon | [ZTP-Policy-Simulator-1.1.0-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.1.0/ZTP-Policy-Simulator-1.1.0-macos-arm64.zip) |
+| macOS Intel | [ZTP-Policy-Simulator-1.1.0-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.1.0/ZTP-Policy-Simulator-1.1.0-macos-x64.zip) |
+| Source | clone the repo, or GitHub's "Source code" download on the release |
+
+Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.1.0/SHA256SUMS.txt)
 
 No install, no Node.js required. Run it and it opens `http://127.0.0.1:8787`.
 macOS builds are unsigned — before first run: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`.
