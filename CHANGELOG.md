@@ -6,6 +6,7 @@
 - Earlier rules that depend on missing context are only shown when they'd change the outcome.
 - DLP / inspect-only suppressed when SSL is not decrypted.
 - Removed the Z-Insights activity panel.
+- Rebuilt all binaries with source embedded (`--no-bytecode`). Fixes `Cannot find module '/snapshot/zps/server.js'` on launch in the 1.1.0 macOS and Windows builds.
 
 ## 1.0.0 — 2026-10-13
 - Renamed **ZeroTrustPanda ZS Policy Simulator**; UI rebuilt in the Policy Wizard theme with Connect → Load policies → Simulate steps.
