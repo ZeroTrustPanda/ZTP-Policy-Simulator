@@ -62,7 +62,7 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: .
 input:focus, select:focus, textarea:focus { border-color: var(--accent-blue); }
 textarea { resize: vertical; min-height: 72px; font-family: var(--mono); font-size: 12px; }
 select { cursor: pointer; }
-.btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: var(--radius); font-family: inherit; font-size: 14px; font-weight: 500; cursor: pointer; border: 1px solid transparent; transition: all .15s; }
+.btn { text-decoration: none; display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: var(--radius); font-family: inherit; font-size: 14px; font-weight: 500; cursor: pointer; border: 1px solid transparent; transition: all .15s; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn-primary { background: var(--accent-blue); color: #fff; } .btn-primary:hover:not(:disabled) { background: #2563eb; }
 .btn-success { background: var(--accent-green); color: #fff; } .btn-success:hover:not(:disabled) { background: #059669; }
@@ -151,6 +151,26 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 12
 .bar { background: var(--accent-blue); height: 8px; border-radius: 4px; }
 .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent-blue); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; }
 @keyframes spin { to { transform: rotate(360deg); } }
+.seg { display: inline-flex; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 3px; gap: 3px; margin-bottom: 1.25rem; }
+.seg button { background: none; border: none; color: var(--text-secondary); font: inherit; font-size: 13px; font-weight: 500; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
+.seg button:hover { color: var(--text-primary); }
+.seg button.on { background: var(--accent-blue-dim); color: #bfdbfe; }
+.drop { border: 1.5px dashed var(--border); border-radius: var(--radius); padding: 20px; text-align: center; background: var(--bg-input); transition: all .15s; }
+.drop.over { border-color: var(--accent-blue); background: rgba(59,130,246,.08); }
+.drop-main { font-size: 14px; font-weight: 500; margin-bottom: 4px; }
+.drop .fname { margin-top: 8px; font-size: 13px; color: #bfdbfe; }
+.linkbtn { background: none; border: none; color: #93c5fd; font: inherit; cursor: pointer; padding: 0; text-decoration: underline; }
+.progress { height: 8px; background: var(--bg-input); border-radius: 4px; overflow: hidden; margin: 4px 0 10px; }
+.progress > div { height: 100%; background: var(--accent-blue); transition: width .4s; }
+.stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 14px 0; }
+.stat { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; background: var(--bg-input); }
+.stat .n { font-size: 26px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.stat .l { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--text-secondary); margin-top: 4px; }
+.stat.BLOCKED .n { color: #fca5a5; } .stat.ALLOWED .n { color: #6ee7b7; } .stat.BYPASSED .n { color: #e2e8f0; }
+.stat.ISOLATED .n { color: #67e8f9; } .stat.CAUTIONED .n { color: #fcd34d; } .stat.COULD .n { color: #c4b5fd; } .stat.ERR .n { color: #fca5a5; }
+.two { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 1.25rem; }
+.tablewrap { overflow-x: auto; }
+@media (max-width: 1000px) { .two { grid-template-columns: 1fr; } }
 .hidden { display: none !important; }
 @media (max-width: 900px) { .sidebar { display: none; } .content { padding: 1rem; } .span2 { grid-column: auto; } .crit { grid-template-columns: 1fr; } .header { padding: 0 1rem; } }
 </style>
@@ -228,6 +248,8 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 12
       </section>
 
       <section id="step3" class="hidden">
+        <div class="seg" id="modeSeg" role="tablist"><button class="on" data-mode="single" role="tab">🎯 Single transaction</button><button data-mode="bulk" role="tab">📋 Bulk test (CSV)</button></div>
+        <div id="singlePanel">
         <div class="card">
           <div class="card-header"><h2>Simulate a transaction</h2><p>Every field is optional. Leave Destination blank to ask "is this port or service blocked for everyone?"</p></div>
           <div class="grid">
@@ -277,6 +299,27 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 12
           <div class="btn-group"><button class="btn btn-primary" id="btnSim">Simulate</button><span class="msg" id="simMsg"></span></div>
         </div>
         <div id="simOut"></div>
+        </div>
+        <div id="bulkPanel" class="hidden">
+          <div class="card">
+            <div class="card-header"><h2>Bulk test</h2><p>Upload a list of IPs, CIDRs, ranges or hosts. Each one gets its Zscaler category and is run through the loaded policy, then you download the results as a CSV.</p></div>
+            <div class="drop" id="bulkDrop">
+              <input type="file" id="bulkFile" accept=".csv,.txt,.tsv,text/csv,text/plain" class="hidden">
+              <div class="drop-main">📄 Drop a CSV here or <button class="linkbtn" id="bulkPick">choose a file</button></div>
+              <div class="form-hint">One destination per line, or a header row with an <span class="mono">ip</span> column. Optional columns: <span class="mono">port, protocol, sourceIp, location, destCountry, category, user, label</span>. CIDRs and ranges expand to one row per address (up to a /16 per row, 250,000 rows in all). <button class="linkbtn" id="bulkTemplate">Download a template</button></div>
+              <div class="fname hidden" id="bulkFileName"></div>
+            </div>
+            <details style="margin-top:10px"><summary>Or paste a list</summary><textarea id="bulkPaste" style="margin-top:8px" placeholder="203.0.113.10&#10;198.51.100.0/28&#10;192.0.2.1-192.0.2.20"></textarea></details>
+            <div class="grid" style="margin-top:14px">
+              <div><label class="form-label">Default protocol</label><select id="bulkProto"><option value="tcp">TCP</option><option value="udp">UDP</option></select></div>
+              <div><label class="form-label">Default port</label><input type="text" id="bulkPort" placeholder="blank = 443" inputmode="numeric"></div>
+              <div style="display:flex;align-items:flex-end"><label class="chip on" id="bulkLookupChip"><input type="checkbox" id="bulkLookup" checked>🏷 Look up Zscaler categories</label></div>
+            </div>
+            <div class="form-hint" id="bulkLookupHint" style="margin-top:8px"></div>
+            <div class="btn-group"><button class="btn btn-primary" id="btnBulk">Run bulk test</button><button class="btn btn-ghost hidden" id="btnBulkCancel">Cancel</button><span class="msg" id="bulkMsg"></span></div>
+          </div>
+          <div id="bulkOut"></div>
+        </div>
       </section>
 
       <section id="diagSec" class="hidden">
@@ -308,6 +351,7 @@ function go(n) {
   step = n;
   for (const k of [1, 2, 3]) $('step' + k).classList.toggle('hidden', k !== n);
   $('diagSec').classList.add('hidden');
+  if (n === 3 && mode === 'bulk') bulkHint();
   refreshSidebar(); window.scrollTo({ top: 0 });
 }
 function refreshSidebar() {
@@ -336,7 +380,7 @@ function setLoaded(snap) {
 // ---------- chips ----------
 document.querySelectorAll('.chip').forEach((ch) => {
   const cb = ch.querySelector('input');
-  ch.addEventListener('click', (ev) => { ev.preventDefault(); cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); });
+  ch.addEventListener('click', (ev) => { ev.preventDefault(); if (cb.disabled) return; cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); });
   cb.addEventListener('change', () => ch.classList.toggle('on', cb.checked));
 });
 
@@ -367,7 +411,7 @@ $('btnDemo').onclick = async () => {
 };
 $('btnDisconnect').onclick = async () => {
   try { await api('/api/disconnect'); } catch {}
-  sid = null; demo = false; setAuth('Not connected', false); setLoaded(null); $('simOut').innerHTML = ''; go(1);
+  sid = null; demo = false; setAuth('Not connected', false); setLoaded(null); $('simOut').innerHTML = ''; $('bulkOut').innerHTML = ''; go(1);
 };
 $('btnOpenSnap').onclick = () => $('snapFile').click();
 $('snapFile').onchange = async () => {
@@ -434,7 +478,7 @@ function formBody() {
     manual: vis('pacText') ? { pacText: $('pacText').value, destExclusions: $('destExclusions').value, destInclusions: $('destInclusions').value, ipExclusions: $('ipExclusions').value, ipInclusions: $('ipInclusions').value, vpnGateways: $('vpnGateways').value } : {},
   };
 }
-document.querySelectorAll('#step3 input[type=text]').forEach((el) => el.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btnSim').click(); }));
+document.querySelectorAll('#singlePanel input[type=text]').forEach((el) => el.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btnSim').click(); }));
 
 // ---------- step 3: results ----------
 const VERDICT = { BLOCKED: ['⛔', 'BLOCKED'], ALLOWED: ['✅', 'ALLOWED'], BYPASSED: ['↪️', 'BYPASSED'], CONDITIONAL: ['❔', 'DEPENDS ON CONTEXT'] };
@@ -453,7 +497,7 @@ const KIND_ICON = { identity: '👥', location: '📍', other: '⏱', zcc: '💻
 function actBadge(a) { const x = ACT[a] || ['•', a, 'b-slate']; return `<span class="badge ${x[2]}">${x[0]} ${esc(x[1])}</span>`; }
 function actionTile(s, c, modules) {
   const p = s.primary, [ico, word] = ACT[p.action] || ['•', p.action];
-  const ctx = [c.target ? (c.target.raw || c.target.host) : 'any destination', c.port != null ? (c.protocol || 'tcp').toUpperCase() + '/' + c.port : '', (c.categories || []).join(', '), (c.resolvedIps || []).slice(0, 2).join(', '), (c.groups || []).length ? 'groups: ' + c.groups.join(', ') : ''].filter(Boolean).map(esc).join(' · ');
+  const ctx = [c.target ? (c.target.raw || c.target.host) : 'any destination', c.port != null ? (c.protocol || 'tcp').toUpperCase() + '/' + c.port : '', (c.categories || []).length ? 'category: ' + c.categories.join(', ') + (c.categorySource === 'Zscaler lookup' ? ' (Zscaler lookup)' : '') : '', (c.resolvedIps || []).slice(0, 2).join(', '), (c.groups || []).length ? 'groups: ' + c.groups.join(', ') : ''].filter(Boolean).map(esc).join(' · ');
   const tags = (p.tags || []).map((t) => `<span class="badge ${t.tag === 'NOT_INSPECTED' ? 'b-amber' : 'b-blue'}" title="${esc(t.text)}">${t.tag === 'NOT_INSPECTED' ? '🔓 Not inspected' : '🔍 Inspect only'}</span>`).join('');
   const tagText = (p.tags || []).map((t) => `<div class="form-hint">${esc(t.text)}</div>`).join('');
   const why = (p.criteria || []).length ? `<details><summary>Why this rule matched</summary>${crits(p.criteria)}</details>` : '';
@@ -521,6 +565,122 @@ $('btnSim').onclick = async () => {
   } catch (e) { msg('simMsg', e.message); }
   $('btnSim').disabled = false;
 };
+
+// ---------- step 3: single / bulk mode ----------
+let mode = 'single';
+function setMode(m) {
+  mode = m === 'bulk' ? 'bulk' : 'single';
+  document.querySelectorAll('#modeSeg button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
+  $('singlePanel').classList.toggle('hidden', mode !== 'single');
+  $('bulkPanel').classList.toggle('hidden', mode !== 'bulk');
+  try { localStorage.setItem('ztp-sim.mode', mode); } catch {}
+  if (mode === 'bulk') bulkHint();
+}
+document.querySelectorAll('#modeSeg button').forEach((b) => b.onclick = () => setMode(b.dataset.mode));
+try { const m = localStorage.getItem('ztp-sim.mode'); if (m) setMode(m); } catch {}
+
+// ---------- bulk ----------
+let bulkText = null, bulkName = '', bulkTimer = null;
+const RUNNING = ['queued', 'lookup', 'simulate'];
+const RES = { BLOCKED: ['⛔', 'Blocked'], ALLOWED: ['✅', 'Allowed'], BYPASSED: ['↪', 'Bypassed'], ISOLATED: ['🧪', 'Isolated'], CAUTIONED: ['⚠️', 'Caution'] };
+const num = (n) => (n || 0).toLocaleString();
+function fmtSecs(n) { n = Math.max(0, Math.round(n)); return n >= 3600 ? `${Math.floor(n / 3600)}h ${Math.round((n % 3600) / 60)}m` : n >= 60 ? `${Math.floor(n / 60)}m ${n % 60}s` : `${n}s`; }
+function bulkHint() {
+  const off = demo;
+  $('bulkLookup').disabled = off;
+  if (off) { $('bulkLookup').checked = false; $('bulkLookupChip').classList.remove('on'); }
+  $('bulkLookupChip').style.opacity = off ? '.5' : '';
+  $('bulkLookupHint').textContent = off
+    ? 'Category lookup needs a live tenant connection. Sample and offline-snapshot runs use policy only, or a category column in your file.'
+    : 'Each unique IP or host is looked up with Zscaler, 100 per call. If your tenant\'s lookup quota is reached the run pauses and resumes on its own.';
+}
+async function readBulk(f) {
+  if (f.size > 40e6) { msg('bulkMsg', 'That file is larger than 40 MB. Split it into smaller files.'); return; }
+  bulkText = await f.text(); bulkName = f.name;
+  const n = bulkText.split(/\r?\n/).filter((l) => l.trim() && !l.trim().startsWith('#')).length;
+  $('bulkFileName').innerHTML = `<b>${esc(f.name)}</b> · ${num(n)} lines · <button class="linkbtn" id="bulkClear">remove</button>`;
+  $('bulkFileName').classList.remove('hidden');
+  $('bulkClear').onclick = (e) => { e.preventDefault(); bulkText = null; bulkName = ''; $('bulkFile').value = ''; $('bulkFileName').classList.add('hidden'); };
+  $('bulkMsg').textContent = '';
+}
+$('bulkPick').onclick = (e) => { e.preventDefault(); $('bulkFile').click(); };
+$('bulkFile').onchange = () => { const f = $('bulkFile').files[0]; if (f) readBulk(f); };
+(() => {
+  const d = $('bulkDrop');
+  ['dragenter', 'dragover'].forEach((ev) => d.addEventListener(ev, (e) => { e.preventDefault(); d.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((ev) => d.addEventListener(ev, (e) => { e.preventDefault(); d.classList.remove('over'); }));
+  d.addEventListener('drop', (e) => { const f = e.dataTransfer && e.dataTransfer.files[0]; if (f) readBulk(f); });
+})();
+$('bulkTemplate').onclick = (e) => {
+  e.preventDefault();
+  const csv = 'ip,port,protocol,sourceIp,location,destCountry,category,label\r\n203.0.113.10,443,tcp,,,,,single IP\r\n198.51.100.0/28,,,,,,,CIDR (expands to 16 rows)\r\n192.0.2.1-192.0.2.5,443,tcp,,,,,range\r\n8.8.8.8,53,udp,,,,,DNS over UDP\r\n';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'bulk-test-template.csv';
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+};
+$('btnBulk').onclick = async () => {
+  if (!sid || !loaded) { msg('bulkMsg', 'Connect and load policies first.'); return; }
+  const csv = bulkText || $('bulkPaste').value;
+  if (!csv.trim()) { msg('bulkMsg', 'Choose a CSV file or paste a list first.'); return; }
+  $('btnBulk').disabled = true; $('bulkMsg').innerHTML = '<span class="spinner"></span> Reading the list…';
+  try {
+    const j = await api('/api/bulk/start', { csv, fileName: bulkName || 'pasted-list', lookup: $('bulkLookup').checked && !demo, defaultPort: $('bulkPort').value.trim(), defaultProtocol: $('bulkProto').value });
+    $('bulkMsg').textContent = ''; renderBulk(j); pollBulk();
+  } catch (e) { msg('bulkMsg', e.message); $('btnBulk').disabled = false; }
+};
+$('btnBulkCancel').onclick = async () => { $('btnBulkCancel').disabled = true; try { await api('/api/bulk/cancel'); } catch {} };
+function pollBulk() {
+  clearTimeout(bulkTimer);
+  bulkTimer = setTimeout(async () => {
+    try {
+      const { job } = await api('/api/bulk/status');
+      renderBulk(job);
+      if (job && RUNNING.includes(job.phase)) pollBulk();
+    } catch (e) { msg('bulkMsg', e.message); $('btnBulk').disabled = false; $('btnBulkCancel').classList.add('hidden'); }
+  }, 1000);
+}
+function renderBulk(j) {
+  if (!j) { $('bulkOut').innerHTML = ''; return; }
+  const running = RUNNING.includes(j.phase);
+  $('btnBulk').disabled = running; $('btnBulkCancel').classList.toggle('hidden', !running); $('btnBulkCancel').disabled = false;
+  const L = j.lookup, p = j.parse || {}, s = j.summary || { counts: {} };
+  let phase = '', pct = 0;
+  if (j.phase === 'lookup' && L) {
+    const wait = L.waitingUntil ? (L.waitingUntil - Date.now()) / 1000 : 0;
+    pct = L.total ? (L.done / L.total) * 100 : 0;
+    phase = wait > 0 ? `Paused by Zscaler's lookup rate limit · resuming in ${fmtSecs(wait)} · ${num(L.done)} of ${num(L.total)} categories looked up`
+      : `Looking up Zscaler categories · ${num(L.done)} of ${num(L.total)}`;
+  } else if (running) { pct = j.total ? (j.done / j.total) * 100 : 0; phase = `Simulating against the loaded policy · ${num(j.done)} of ${num(j.total)}`; }
+  else if (j.phase === 'done') { pct = 100; phase = `Finished · ${num(j.total)} rows in ${fmtSecs((j.finished - j.started) / 1000)}`; }
+  else if (j.phase === 'cancelled') { pct = j.total ? (j.done / j.total) * 100 : 0; phase = `Cancelled after ${num(j.done)} of ${num(j.total)} rows · results so far can be downloaded`; }
+  else phase = `<span class="err">Bulk test failed: ${esc(j.error)}</span>`;
+  const notes = [];
+  if (p.skipped) notes.push(`${num(p.skipped)} line(s) skipped. ${(p.skippedSample || []).slice(0, 4).map((x) => `Line ${x.line} (${esc(x.text)}): ${esc(x.why)}.`).join(' ')}${p.skipped > 4 ? ' …' : ''}`);
+  if (!p.lookup) notes.push(`Category lookup off (${esc(p.lookupOffReason || '')}). Rules that depend on a category show as not matched unless your file has a category column.`);
+  if (L && L.stopped) notes.push(esc(L.stopped));
+  if (L && L.failed) notes.push(`${num(L.failed)} lookups failed. The Category source column says why for each row.`);
+  const stat = (cls, n, label) => `<div class="stat ${cls}"><div class="n">${num(n)}</div><div class="l">${label}</div></div>`;
+  const stats = Object.keys(RES).filter((k) => s.counts[k] || k === 'BLOCKED' || k === 'ALLOWED').map((k) => stat(k, s.counts[k], `${RES[k][0]} ${RES[k][1]}`)).join('')
+    + stat('COULD', s.couldBlock, '❔ Allowed, but blockable') + (s.errors ? stat('ERR', s.errors, 'Errors') : '');
+  const href = (q) => `/api/bulk/result?sessionId=${encodeURIComponent(sid)}${q || ''}`;
+  const dl = j.done ? `<div class="btn-group" style="margin-top:0"><a class="btn btn-success" href="${href()}" download>⬇ Download all results (CSV)</a><a class="btn btn-ghost" href="${href('&only=flagged')}" download>⬇ Flagged rows only</a></div>` : '';
+  let more = '';
+  if (!running && j.done) {
+    const rules = (s.topRules || []).length
+      ? `<table><tr><th>Rule</th><th>Module</th><th>Action</th><th style="text-align:right">Rows</th></tr>${s.topRules.map((r) => `<tr><td>${esc(r.rule)}</td><td>${esc(r.module)}</td><td>${actBadge(r.action)}</td><td style="text-align:right">${num(r.count)}</td></tr>`).join('')}</table>`
+      : '<div class="empty">No row was blocked, bypassed, isolated or cautioned.</div>';
+    const cats = (s.topCategories || []).length
+      ? `<table><tr><th>Category</th><th style="text-align:right">Rows</th></tr>${s.topCategories.map((c) => `<tr><td class="mono">${esc(c.category)}</td><td style="text-align:right">${num(c.count)}</td></tr>`).join('')}</table>` : '';
+    const pv = j.preview || [];
+    const prev = pv.length
+      ? `<div class="tablewrap"><table><tr><th>Destination</th><th>Category</th><th>Result</th><th>Module · rule</th><th>Could be blocked by</th></tr>${pv.map((r) => `<tr><td class="mono">${esc(r.target)}${r.label ? `<div class="form-hint">${esc(r.label)}</div>` : ''}</td><td class="mono">${esc(r.category || '')}${r.securityCategory ? ` <span class="badge b-red">${esc(r.securityCategory)}</span>` : ''}</td><td>${r.error ? '<span class="badge b-red">error</span>' : actBadge(r.action)}</td><td>${r.error ? `<span class="err">${esc(r.error)}</span>` : `${esc(r.module || '')}${r.rule ? ` · <b>${esc(r.rule)}</b>` : ''}`}</td><td class="form-hint">${esc(r.couldBlock || '')}</td></tr>`).join('')}</table></div>${pv.length >= 200 ? '<div class="form-hint" style="margin-top:6px">Showing the first 200 flagged rows. The CSV has all of them.</div>' : ''}`
+      : '<div class="empty">Nothing flagged: every row was allowed and no condition would block it.</div>';
+    more = `<div class="two"><div class="card"><div class="card-header"><h3>What decided the rows that weren't allowed</h3></div>${rules}</div>
+      <div class="card"><div class="card-header"><h3>Zscaler categories</h3><p style="font-size:13px">${num(s.lookedUp)} rows categorised by Zscaler lookup</p></div>${cats}</div></div>
+      <div class="card"><div class="card-header"><h3>Flagged rows</h3><p style="font-size:13px">Blocked, bypassed, isolated or cautioned, plus allowed rows that a condition such as user or location could block.</p></div>${prev}</div>`;
+  }
+  $('bulkOut').innerHTML = `<div class="card"><div class="card-header"><h3>${running ? '<span class="spinner"></span> ' : ''}${phase}</h3></div><div class="progress"><div style="width:${pct.toFixed(1)}%"></div></div>${notes.map((n) => `<div class="note">${n}</div>`).join('')}<div class="stats">${stats}</div>${dl}</div>${more}`;
+}
 
 // ---------- diagnostics ----------
 $('btnDiag').onclick = async () => {

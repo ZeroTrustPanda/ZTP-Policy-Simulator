@@ -5,7 +5,8 @@ const crypto = require('crypto');
 const dns = require('dns').promises;
 const { exec } = require('child_process');
 
-const { ZClient, loadSnapshot, probe, catalog, lookupUser, urlLookup } = require('./src/zscaler');
+const { ZClient, loadSnapshot, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX } = require('./src/zscaler');
+const bulk = require('./src/bulk');
 const { simulate, rationalize } = require('./src/engine');
 const M = require('./src/matchers');
 const VERSION = require('./package.json').version;
@@ -19,7 +20,7 @@ const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-setInterval(() => { const now = Date.now(); for (const [k, v] of sessions) if (now - v.last > SESSION_TTL) sessions.delete(k); }, 60000).unref();
+setInterval(() => { const now = Date.now(); for (const [k, v] of sessions) if (now - v.last > SESSION_TTL && !(v.bulk && ['lookup', 'simulate', 'queued'].includes(v.bulk.phase))) sessions.delete(k); }, 60000).unref();
 
 function getSession(req, res) {
   const id = (req.body && req.body.sessionId) || req.query.sessionId;
@@ -131,18 +132,33 @@ async function buildContext(s, b) {
   if (tg && !tg.isIp && !tg.isWildcard && !b.ip) {
     try { ctx.resolvedIps = (await dns.resolve4(tg.host)).slice(0, 8); } catch { ctx.notes.push(`DNS resolution of ${tg.host} failed locally; IP-based rules may show as unknown.`); }
   }
-  if (b.categories && b.categories.length) ctx.categories = b.categories;
-  else if (tg && !s.demo && s.client && !tg.isIp) {
-    try {
-      const probeHost = tg.isWildcard ? 'www.' + tg.host.replace(/^\*\.?/, '') : tg.host;
-      const out = await urlLookup(s.client, [probeHost]);
-      if (out[0]) ctx.categories = [...(out[0].urlClassifications || []), ...(out[0].urlClassificationsWithSecurityAlert || [])];
-      if (tg.isWildcard) ctx.notes.push(`Wildcard query: categories taken from probe host ${probeHost}.`);
-    } catch (e) { ctx.notes.push(`URL category lookup failed: ${e.message}`); }
+  if (b.categories && b.categories.length) { ctx.categories = b.categories; ctx.categorySource = b.noLookup ? 'precomputed' : 'entered'; }
+  else if (tg && !b.noLookup && !s.demo && s.client) {
+    // Zscaler classification for the destination: hostnames and single IPs (not CIDRs/ranges). Cached per session.
+    const key = bulk.lookupKey(tg.raw || tg.host);
+    if (key) {
+      s.catCache = s.catCache || new Map();
+      try {
+        if (!s.catCache.has(key)) {
+          const out = await urlLookup(s.client, [key]);
+          const o = out.find((x) => String(x.url || '').toLowerCase() === key.toLowerCase()) || out[0];
+          s.catCache.set(key, o ? { categories: o.urlClassifications || [], security: o.urlClassificationsWithSecurityAlert || [] } : { categories: [], security: [], error: 'not returned' });
+        }
+        const c = s.catCache.get(key);
+        ctx.categories = [...c.categories, ...c.security];
+        ctx.securityCategories = c.security;
+        ctx.categorySource = 'Zscaler lookup';
+        if (tg.isWildcard) ctx.notes.push(`Wildcard query: categories taken from probe host ${key}.`);
+        if (c.error) ctx.notes.push(`Zscaler returned no category for ${key}.`);
+      } catch (e) { ctx.notes.push(`Category lookup failed: ${e.message}`); }
+    } else if (tg.isIp) ctx.notes.push('Category lookup skipped: CIDRs and ranges have no single classification — enter one IP to look it up.');
   }
   if (b.user && !s.demo && s.client && !(b.groups && b.groups.length)) {
+    s.userCache = s.userCache || new Map();
     try {
-      const u = await lookupUser(s.client, b.user);
+      const k = String(b.user).toLowerCase();
+      if (!s.userCache.has(k)) s.userCache.set(k, await lookupUser(s.client, b.user));
+      const u = s.userCache.get(k);
       if (u) { ctx.groups = u.groups; ctx.department = ctx.department || u.department; ctx.userResolved = u; }
       else ctx.notes.push(`User "${b.user}" not found in ZIA; group/department rules will show as unknown unless you enter them.`);
     } catch (e) { ctx.notes.push(`User lookup failed: ${e.message}`); }
@@ -161,6 +177,51 @@ app.post('/api/simulate', wrap(async (req, res) => {
   res.json(out);
 }));
 
+// ---------- bulk ----------
+app.post('/api/bulk/start', wrap(async (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  if (!s.snap) return res.status(409).json({ error: 'Policies are not loaded yet. Click "Load policies" first.' });
+  if (s.bulk && ['lookup', 'simulate', 'queued'].includes(s.bulk.phase)) return res.status(409).json({ error: 'A bulk test is already running. Cancel it or wait for it to finish.' });
+  const b = req.body || {};
+  const parsed = bulk.parseCsv(b.csv || '');
+  if (!parsed.entries.length) return res.status(400).json({ error: 'No destinations found. Put one IP, CIDR, range or host per line, or use a header row with an "ip" column.', skipped: parsed.skipped.slice(0, 20) });
+  const ex = bulk.expand(parsed.entries);
+  if (ex.error) return res.status(400).json({ error: ex.error });
+  if (!ex.rows.length) return res.status(400).json({ error: 'Nothing valid to test.', skipped: [...parsed.skipped, ...ex.skipped].slice(0, 20) });
+  const opts = { lookup: b.lookup !== false && !!s.client, defaultPort: b.defaultPort || '', defaultProtocol: b.defaultProtocol || 'tcp' };
+  const skipped = [...parsed.skipped, ...ex.skipped];
+  const job = {
+    id: crypto.randomBytes(6).toString('hex'), phase: 'queued', total: ex.rows.length, done: 0, results: [], started: Date.now(), name: String(b.fileName || 'bulk').replace(/\.[^.]+$/, ''),
+    parse: { entries: parsed.entries.length, rows: ex.rows.length, header: parsed.header, skipped: skipped.length, skippedSample: skipped.slice(0, 20), lookup: opts.lookup, lookupOffReason: opts.lookup ? null : s.client ? 'turned off' : 'not connected to a tenant (sample or offline snapshot)' },
+    touch: () => { s.last = Date.now(); },
+  };
+  s.bulk = job;
+  bulk.runJob(s, job, ex.rows, opts, { buildContext, simulate, urlLookup, URL_LOOKUP_MAX });
+  console.log(`[bulk] ${job.total} rows (lookup ${opts.lookup ? 'on' : 'off'})`);
+  res.json(bulk.status(job));
+}));
+
+app.post('/api/bulk/status', (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  res.json({ job: bulk.status(s.bulk) });
+});
+
+app.post('/api/bulk/cancel', (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  if (s.bulk) s.bulk.cancelled = true;
+  res.json({ ok: true });
+});
+
+app.get('/api/bulk/result', (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  const j = s.bulk;
+  if (!j) return res.status(404).json({ error: 'No bulk test in this session.' });
+  const only = req.query.only === 'flagged' ? (r) => r.error || r.action !== 'ALLOW' || r.couldBlock : null;
+  const stamp = new Date(j.started).toISOString().slice(0, 16).replace(/[:T]/g, '-');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${j.name.replace(/[^\w.-]+/g, '_')}-results${only ? '-flagged' : ''}-${stamp}.csv"`);
+  res.send('\uFEFF' + bulk.toCsv(j.results, only));
+});
 
 app.listen(PORT, HOST, () => {
   const url = `http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`;

@@ -1,4 +1,4 @@
-# ZeroTrustPanda ZS Policy Simulator v1.1.0
+# ZeroTrustPanda ZS Policy Simulator v1.2.0
 
 **Would this be allowed, blocked or bypassed — and by what?** A standalone, read-only simulator that pulls your live Zscaler policy over OneAPI and evaluates a transaction across ZIA, ZPA and Client Connector the way the cloud would, in rule order, then shows the deciding rule and everything else that could change the outcome.
 
@@ -7,18 +7,18 @@ Companion to the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustP
 ## Downloads
 | Platform | File |
 |---|---|
-| Windows x64 | [ZTP-Policy-Simulator-1.1.0-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.1.0/ZTP-Policy-Simulator-1.1.0-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
-| macOS Apple Silicon | [ZTP-Policy-Simulator-1.1.0-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.1.0/ZTP-Policy-Simulator-1.1.0-macos-arm64.zip) |
-| macOS Intel | [ZTP-Policy-Simulator-1.1.0-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.1.0/ZTP-Policy-Simulator-1.1.0-macos-x64.zip) |
+| Windows x64 | [ZTP-Policy-Simulator-1.2.0-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.2.0/ZTP-Policy-Simulator-1.2.0-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
+| macOS Apple Silicon | [ZTP-Policy-Simulator-1.2.0-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.2.0/ZTP-Policy-Simulator-1.2.0-macos-arm64.zip) |
+| macOS Intel | [ZTP-Policy-Simulator-1.2.0-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.2.0/ZTP-Policy-Simulator-1.2.0-macos-x64.zip) |
 | Source | clone the repo, or GitHub's "Source code" download on the release |
 
-Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.1.0/SHA256SUMS.txt)
+Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.2.0/SHA256SUMS.txt)
 
 No install, no Node.js required. Run it and it opens `http://127.0.0.1:8787`.
 macOS builds are unsigned — before first run: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`.
 
 ## What it does
-**1 · Connect → 2 · Load policies → 3 · Simulate**
+**1 · Connect → 2 · Load policies → 3 · Simulate**  — one transaction, or a bulk CSV of thousands of IPs or hosts
 
 - **Connect** with ZIdentity OneAPI client credentials (vanity domain, client ID, secret, optional ZPA customer ID). Credentials stay in memory, never written to disk; the server listens on loopback only.
 - **Load policies** — URL filtering, firewall, DNS, SSL inspection, file type, sandbox, web DLP, ATP settings and lists, custom URL categories, network services/groups, network application groups, IP source/destination groups, locations; Client Connector Windows/macOS app profiles, forwarding profiles, IP-based app bypasses and referenced PAC files; ZPA application segments and access policy. Per-policy-set status table with real API errors.
@@ -29,6 +29,21 @@ macOS builds are unsigned — before first run: `codesign --sign - ./ZTP-Policy-
 - **Policy action also based on** — every condition that would change that action, each with its own action and rule: user/group/department, location, time window / device trust, Client Connector app profile + network type, uploaded content (DLP). For bypassed traffic it shows what ZIA would do if it were forwarded.
 - **How it gets there** — each Client Connector app profile, per network type (On-/Off-/VPN-/Split VPN-Trusted): forwarding action (None / Tunnel / Tunnel with local proxy / Enforce proxy), IPv4 and domain inclusions/exclusions, VPN gateway bypasses, IP-based app bypasses, PAC results (evaluated with `FindProxyForURL`).
 - **Every module** — firewall, DNS, SSL, ATP, URL filtering, file type, sandbox, DLP and ZPA with every evaluated rule and each criterion's match / no match / unknown.
+
+### Bulk test (CSV) — new in 1.2.0
+Switch the Simulate step to **📋 Bulk test (CSV)** to run thousands of destinations at once (about a minute for 50,000 IPs, plus the category lookup).
+
+- **Input:** drop a CSV, choose a file or paste a list. Use one destination per line, or a header row with an `ip` column. Optional columns are `port`, `protocol`, `sourceIp`, `location`, `destCountry`, `category`, `user` and `label`. A blank port means TCP/443. CIDRs and ranges expand to one row per address (up to a /16 per row, 250,000 rows in all). Hosts and URLs work too. **Download a template** in the UI gives an example file.
+- **Zscaler categories:** each unique IP or host is looked up with ZIA's `urlLookup`, 100 per call. If your tenant's lookup quota is reached, the run pauses and resumes on its own, and the wait is shown. A `category` column in your file overrides the lookup.
+- **Output:** counts (Blocked / Allowed / Bypassed / Isolated / Caution / allowed but blockable), the rules that decided the rows that weren't allowed, top categories, and a preview of the flagged rows. **Download all results** or **Flagged rows only** as a CSV with one row per address:
+  - the category and any security-alert category
+  - the result and deciding module, rule and order
+  - the firewall and URL filtering verdicts with their rules
+  - the Client Connector forwarding verdict
+  - "Could be blocked by", for user, location or time conditions that would block an allowed row
+- **What an IP can match:** Client Connector inclusions, exclusions and bypasses; firewall destination IPs, IP groups, IP categories and countries; custom URL categories that list IP ranges; URL filtering category rules (once the category is known); ZPA segments defined by IP or CIDR. DNS Control doesn't apply to a bare IP, because there's no DNS lookup.
+
+Single simulations of a single IP or host now also show its Zscaler category (`category: … (Zscaler lookup)`).
 
 ### Smart defaults (always stated, always overridable)
 Port from the URL scheme (hostnames assume HTTPS/443) · network service and application from protocol+port (UDP/443 → QUIC) · request method GET, or CONNECT when not decrypted · file type from the URL path · standard DNS resolver for DNS app rules · default rules (order −1) evaluated last.
@@ -42,6 +57,12 @@ Port from the URL scheme (hostnames assume HTTPS/443) · network service and app
 - Zscaler offers no "evaluate this transaction" API, so evaluation is re-implemented from rule data. Time windows, user agent, device trust, risk score and source-port bypasses are flagged as unknown rather than evaluated.
 - No per-transaction log lookup: the console's transaction-log endpoints refuse API-client tokens. Use the console's Web / Firewall Insights logs for per-transaction proof.
 - ZCC field names follow the shapes verified by the Policy Wizard; report any app profile that shows "no forwarding profile linked".
+
+## Changes in 1.2.0
+- **Bulk test (CSV):** upload or paste IPs, CIDRs, ranges or hosts and get a results CSV with category, action, deciding rule and "could be blocked by" for every address. The run shows live progress, waits out rate limits, can be cancelled, and caps at 250,000 rows.
+- **Zscaler category lookup for IPs**, in bulk and for single simulations. It feeds firewall IP-category rules and URL filtering category rules.
+- User lookups are cached per session.
+- Binaries are built with source embedded (`--no-bytecode`). This fixes the 1.1.0 startup error `Cannot find module '/snapshot/zps/server.js'`.
 
 ## Changes in 1.1.0
 - New two-tile result header: Policy rule action + Policy action also based on.

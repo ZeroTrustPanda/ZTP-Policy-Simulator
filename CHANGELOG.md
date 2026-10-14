@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0 — 2026-10-14
+- Bulk test (CSV) mode in the Simulate step: CSV/paste input with header aliases, CIDR/range expansion (/16 per row, 250,000 rows max), batched ZIA `urlLookup` (100 per call) with rate-limit waits, progress, cancel, summary and preview, and results CSV (all or flagged only, formula-safe).
+- Zscaler category lookup for single IPs in one-off simulations (cached per session); user lookups cached.
+- "Could be blocked by" only counts user / location / time conditions, and ignores category conditions when no category is known.
+- Build script uses `--no-bytecode --public` (fixes the startup error in 1.1.0 binaries).
+
 ## 1.1.0 — 2026-10-13
 - Two-tile result header: **Policy rule action** (Block / Allow / Bypass / Isolate / Caution, with Not inspected and Inspect only tags) and **Policy action also based on** (identity, location, other rule conditions, Client Connector profile + network type, DLP content).
 - Isolate and Caution are distinct actions.

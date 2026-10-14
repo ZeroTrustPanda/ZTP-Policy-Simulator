@@ -1,13 +1,13 @@
 # 🐼 ZeroTrustPanda ZS Policy Simulator
 
-**Downloads (v1.1.0):** [Windows x64](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.1.0/ZTP-Policy-Simulator-1.1.0-windows-x64.zip) · [macOS Apple Silicon](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.1.0/ZTP-Policy-Simulator-1.1.0-macos-arm64.zip) · [macOS Intel](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.1.0/ZTP-Policy-Simulator-1.1.0-macos-x64.zip) · [SHA256SUMS](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.1.0/SHA256SUMS.txt) — all builds in [`downloads/`](downloads/). Release notes: [RELEASE_NOTES.md](RELEASE_NOTES.md) · history: [CHANGELOG.md](CHANGELOG.md)
+**Downloads (v1.2.0):** [Windows x64](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.2.0/ZTP-Policy-Simulator-1.2.0-windows-x64.zip) · [macOS Apple Silicon](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.2.0/ZTP-Policy-Simulator-1.2.0-macos-arm64.zip) · [macOS Intel](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.2.0/ZTP-Policy-Simulator-1.2.0-macos-x64.zip) · [SHA256SUMS](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.2.0/SHA256SUMS.txt) — all builds in [`downloads/`](downloads/). Release notes: [RELEASE_NOTES.md](RELEASE_NOTES.md) · history: [CHANGELOG.md](CHANGELOG.md)
 
 Standalone, read-only tool that answers "would this be allowed, blocked or bypassed — and by what?" against your live Zscaler policy. Same look as the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustPanda/ZTP-Policy-Wizard).
 
 ## Flow
 1. **Connect** — OneAPI client credentials (ZIdentity vanity domain, client ID, secret; optional ZPA customer ID). Probes ZIA / Client Connector / ZPA reachability.
 2. **Load policies** — pulls the rule sets with a live per-policy-set status table. Reload any time.
-3. **Simulate** — enter a destination (URL, host, IP, CIDR, wildcards), protocol/port or network service, and optional details (user/group/location, file/method/category, application, source IP/country, test bypass inputs). Leave the destination blank for "is this port/service blocked for everyone?".
+3. **Simulate** — one transaction at a time, or a **bulk CSV** of IPs/hosts (see below). Enter a destination (URL, host, IP, CIDR, wildcards), protocol/port or network service, and optional details (user/group/location, file/method/category, application, source IP/country, test bypass inputs). Leave the destination blank for "is this port/service blocked for everyone?".
 
 ## Result
 Two tiles at the top:
@@ -19,6 +19,21 @@ Below the tiles:
 - **Every module** — firewall, DNS, SSL, ATP, URL filtering, file type, sandbox, DLP, ZPA, with all evaluated rules on click.
 
 Smart defaults: port from the URL scheme (hostnames assume HTTPS/443), network service/application inferred from protocol+port (UDP/443 → QUIC), request method GET (CONNECT when not decrypted), file type from the URL path, standard DNS resolver for DNS app rules. Every assumption is stated on the result and can be overridden.
+
+## Bulk test (CSV)
+Switch the Simulate step to **📋 Bulk test (CSV)** to run thousands of destinations at once (about a minute for 50,000 IPs, plus the category lookup).
+
+- **Input:** drop a CSV, choose a file or paste a list. Use one destination per line, or a header row with an `ip` column. Optional columns are `port`, `protocol`, `sourceIp`, `location`, `destCountry`, `category`, `user` and `label`. A blank port means TCP/443. CIDRs and ranges expand to one row per address (up to a /16 per row, 250,000 rows in all). Hosts and URLs work too. **Download a template** in the UI gives an example file.
+- **Zscaler categories:** each unique IP or host is looked up with ZIA's `urlLookup`, 100 per call. If your tenant's lookup quota is reached, the run pauses and resumes on its own, and the wait is shown. A `category` column in your file overrides the lookup.
+- **Output:** counts (Blocked / Allowed / Bypassed / Isolated / Caution / allowed but blockable), the rules that decided the rows that weren't allowed, top categories, and a preview of the flagged rows. **Download all results** or **Flagged rows only** as a CSV with one row per address:
+  - the category and any security-alert category
+  - the result and deciding module, rule and order
+  - the firewall and URL filtering verdicts with their rules
+  - the Client Connector forwarding verdict
+  - "Could be blocked by", for user, location or time conditions that would block an allowed row
+- **What an IP can match:** Client Connector inclusions, exclusions and bypasses; firewall destination IPs, IP groups, IP categories and countries; custom URL categories that list IP ranges; URL filtering category rules (once the category is known); ZPA segments defined by IP or CIDR. DNS Control doesn't apply to a bare IP, because there's no DNS lookup.
+
+Single simulations of a single IP or host now also show its Zscaler category (`category: … (Zscaler lookup)`).
 
 ## Run
 - Windows: `ZTP-Policy-Simulator.exe` — serves http://127.0.0.1:8787 and opens your browser (`PORT`, `NO_OPEN=1` supported).
@@ -36,6 +51,7 @@ Smart defaults: port from the URL scheme (hostnames assume HTTPS/443), network s
 - `src/zscaler.js` — OneAPI client and policy loader
 - `src/engine.js` — ordered rule evaluation and outcome model
 - `src/zcc.js` — Client Connector per-profile forwarding evaluation
+- `src/bulk.js` — CSV parsing, CIDR/range expansion, batched category lookup, results CSV
 - `src/matchers.js` — wildcard domain, IP/CIDR/range, port and PAC matching
 - `public/index.html` — single-file UI
 - `test/` — `node --test` suite with sample policies

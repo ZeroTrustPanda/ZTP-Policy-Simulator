@@ -53,6 +53,15 @@ function snippet(body) {
   return (s || '').replace(/\s+/g, ' ').slice(0, 300);
 }
 
+// Seconds to wait from a 429: Retry-After / X-RateLimit-Reset headers, or ZIA's body form {"Retry-After": "12 seconds"}.
+function retryAfterSeconds(r) {
+  const h = r.headers || {};
+  let v = h['retry-after'] || h['x-ratelimit-reset'];
+  if (!v && r.body && typeof r.body === 'object') v = r.body['Retry-After'] || r.body.retryAfter;
+  const n = parseInt(String(v || '').replace(/[^0-9]/g, ''), 10);
+  return isNaN(n) ? null : n;
+}
+
 class ZClient {
   constructor(cfg) {
     this.cfg = Object.assign({ cloud: 'production' }, cfg);
@@ -96,7 +105,7 @@ class ZClient {
     if (this.log.length > 500) this.log.shift();
   }
 
-  async request(method, path, { query, body, audience, headers: extra } = {}, attempt = 0) {
+  async request(method, path, { query, body, audience, headers: extra, rateRetries = 5 } = {}, attempt = 0) {
     if (audience === undefined && path.startsWith('/zins')) audience = ZINS_AUDIENCE;
     // ZIA OneAPI allows roughly 1-2 req/s per endpoint family; space calls like the wizard does.
     const gap = Date.now() - this.lastCall;
@@ -109,10 +118,10 @@ class ZClient {
     if (body) h['Content-Type'] = 'application/json';
     const r = await rawRequest(method, this.apiHost, p, body ? JSON.stringify(body) : null, h);
     this.pushLog(method, `https://${this.apiHost}${p}`, r.status, r.status >= 400 ? snippet(r.body) : '');
-    if (r.status === 429 && attempt < 5) {
-      const ra = parseInt(r.headers['retry-after'] || r.headers['x-ratelimit-reset'] || '2', 10) || 2;
+    if (r.status === 429 && attempt < rateRetries) {
+      const ra = retryAfterSeconds(r) || 2;
       await new Promise((res) => setTimeout(res, Math.min(ra, 30) * 1000));
-      return this.request(method, path, { query, body, audience, headers: extra }, attempt + 1);
+      return this.request(method, path, { query, body, audience, headers: extra, rateRetries }, attempt + 1);
     }
     if (r.status === 401 && attempt === 0) {
       // Z-Insights: if the audience token is rejected, try the plain token before giving up (and vice versa).
@@ -120,7 +129,7 @@ class ZClient {
       await this.auth(true, audience || null); return this.request(method, path, { query, body, audience, headers: extra }, 1);
     }
     if (r.status < 200 || r.status >= 300) {
-      throw Object.assign(new Error(`HTTP ${r.status} ${method} ${p}: ${snippet(r.body) || '(empty body)'}${hintFor(r.status, path)}`), { status: r.status });
+      throw Object.assign(new Error(`HTTP ${r.status} ${method} ${p}: ${snippet(r.body) || '(empty body)'}${hintFor(r.status, path)}`), { status: r.status, retryAfter: r.status === 429 ? retryAfterSeconds(r) : null });
     }
     return r.body;
   }
@@ -250,10 +259,12 @@ async function lookupUser(client, nameOrEmail) {
   return { name: u.name, email: u.email, groups: (u.groups || []).map((g) => g.name), department: u.department && u.department.name };
 }
 
-// URL category lookup (read-only POST).
-async function urlLookup(client, urls) {
-  const out = await client.post(`${ZIA}/urlLookup`, urls);
+// URL / IP category lookup (read-only POST, up to 100 entries per call). Pass rateRetries: 0 to get 429s back
+// as errors (with err.retryAfter) so a long-running caller can wait and report progress itself.
+const URL_LOOKUP_MAX = 100;
+async function urlLookup(client, urls, { rateRetries } = {}) {
+  const out = await client.request('POST', `${ZIA}/urlLookup`, { body: urls, rateRetries });
   return Array.isArray(out) ? out : [];
 }
 
-module.exports = { ZClient, loadSnapshot, probe, catalog, lookupUser, urlLookup, ENDPOINTS };
+module.exports = { ZClient, loadSnapshot, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, ENDPOINTS };
