@@ -1,6 +1,7 @@
 'use strict';
 // Zscaler OneAPI client (ZIdentity OAuth2 client-credentials) + policy snapshot loader.
-// Read-only: only GET calls (plus POST /urlLookup, which is a read operation) are made.
+// Reads policy with GET (plus POST /urlLookup, a read). Policy changes (PUT/POST/DELETE) are made only by
+// src/changes.js, only when write mode is switched on for the session, and only after the admin confirms a preview.
 //
 // Auth mirrors the ZTP wizard's working client: POST {vanity}.zslogin.net/oauth2/v1/token with
 // grant_type/client_id/client_secret and NO audience parameter. (An audience such as
@@ -136,6 +137,8 @@ class ZClient {
 
   get(path, query) { return this.request('GET', path, { query }); }
   post(path, body, query) { return this.request('POST', path, { body, query }); }
+  put(path, body, query) { return this.request('PUT', path, { body, query }); }
+  del(path, query) { return this.request('DELETE', path, { query }); }
 }
 
 function hintFor(status, path) {
@@ -267,4 +270,13 @@ async function urlLookup(client, urls, { rateRetries } = {}) {
   return Array.isArray(out) ? out : [];
 }
 
-module.exports = { ZClient, loadSnapshot, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, ENDPOINTS };
+// Re-read selected policy sets (after a change) into an existing snapshot.
+async function refreshKeys(client, snap, keys) {
+  for (const e of catalog(client).filter((x) => keys.includes(x.key))) {
+    try { snap.data[e.key] = unwrap(await client.get(e.path, e.query)); delete snap.errors[e.key]; }
+    catch (err) { snap.errors[e.key] = err.message; }
+  }
+  snap.loadedAt = Date.now();
+}
+
+module.exports = { ZClient, loadSnapshot, refreshKeys, ZIA, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, ENDPOINTS };

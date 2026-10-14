@@ -529,8 +529,11 @@ function mAtp(snap, ctx) {
   let decided = null;
   const out = { module: 'Advanced Threat Protection', verdict: 'ALLOW', confidence: 'definite', decidingRule: null, couldOverride: [], rules, reason: 'No ATP setting or list entry matches', considered: 0 };
   if (t) {
-    const a = M.domainInList(t, allow);
-    const d = M.domainInList(t, deny);
+    const ipRel = (list) => { const l = list.filter((x) => M.parseIpRange(x)); const r = t.isIp && l.length ? M.ipInList(t.host, l) : { rel: 'none' }; return { rel: r.rel === 'match' ? 'match' : 'none', entry: r.entry }; };
+    let a = M.domainInList(t, allow.filter((x) => !M.parseIpRange(x)));
+    let d = M.domainInList(t, deny.filter((x) => !M.parseIpRange(x)));
+    if (a.rel === 'none') a = ipRel(allow);
+    if (d.rel === 'none') d = ipRel(deny);
     if (a.rel !== 'none') rules.push({ name: 'Security exception (allowlist)', action: 'ALLOW', status: a.rel === 'match' ? 'match' : 'unknown', criteria: [{ field: 'URL', status: a.rel === 'match' ? 'match' : 'unknown', detail: `${t.host} vs ${a.entry}` }] });
     if (d.rel !== 'none') rules.push({ name: 'Malicious URL list (denylist)', action: 'BLOCK', status: d.rel === 'match' ? 'match' : 'unknown', criteria: [{ field: 'URL', status: d.rel === 'match' ? 'match' : 'unknown', detail: `${t.host} vs ${d.entry}` }] });
   }
@@ -686,7 +689,8 @@ function simulate(snap, ctx, manual = {}) {
     if (ctx.target) {
       if (!ctx.target.isIp && M.domainInList(ctx.target, ents).rel === 'match') hit = true;
       const ipsToTest = ctx.target.isIp ? [ctx.target.host] : ctx.resolvedIps || [];
-      for (const ip of ipsToTest) if (M.ipInList(ip, ips).rel === 'match') hit = true;
+      const ipList = [...ips, ...ents.filter((u) => M.parseIpRange(u))]; // IPs may be listed as custom URLs too
+      for (const ip of ipsToTest) if (M.ipInList(ip, ipList).rel === 'match') hit = true;
     }
     if (hit) { cats.add(c.id); if (c.configuredName) cats.add(c.configuredName); }
   }

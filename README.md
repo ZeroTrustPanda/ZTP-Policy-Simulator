@@ -1,8 +1,8 @@
 # 🐼 ZeroTrustPanda ZS Policy Simulator
 
-**Downloads (v1.3.0):** [Windows x64](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.3.0/ZTP-Policy-Simulator-1.3.0-windows-x64.zip) · [macOS Apple Silicon](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.3.0/ZTP-Policy-Simulator-1.3.0-macos-arm64.zip) · [macOS Intel](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.3.0/ZTP-Policy-Simulator-1.3.0-macos-x64.zip) · [SHA256SUMS](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.3.0/SHA256SUMS.txt) — all builds in [`downloads/`](downloads/). Release notes: [RELEASE_NOTES.md](RELEASE_NOTES.md) · history: [CHANGELOG.md](CHANGELOG.md)
+**Downloads (v1.4.0):** [Windows x64](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.4.0/ZTP-Policy-Simulator-1.4.0-windows-x64.zip) · [macOS Apple Silicon](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.4.0/ZTP-Policy-Simulator-1.4.0-macos-arm64.zip) · [macOS Intel](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.4.0/ZTP-Policy-Simulator-1.4.0-macos-x64.zip) · [SHA256SUMS](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.4.0/SHA256SUMS.txt) — all builds in [`downloads/`](downloads/). Release notes: [RELEASE_NOTES.md](RELEASE_NOTES.md) · history: [CHANGELOG.md](CHANGELOG.md)
 
-Standalone, read-only tool that answers "would this be allowed, blocked or bypassed — and by what?" against your live Zscaler policy. Same look as the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustPanda/ZTP-Policy-Wizard).
+Standalone tool that answers "would this be allowed, blocked or bypassed — and by what?" against your live Zscaler policy. Same look as the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustPanda/ZTP-Policy-Wizard).
 
 ## Flow
 1. **Connect** — OneAPI client credentials (ZIdentity vanity domain, client ID, secret; optional ZPA customer ID). Probes ZIA / Client Connector / ZPA reachability.
@@ -43,6 +43,24 @@ Single simulations of a single IP or host now also show its Zscaler category (`c
 ## Category lookup (single page)
 **🏷 Look up category** next to Simulate looks up the Destination with Zscaler (up to 100 entries, separated by commas or spaces). It shows each category, tagged *threat*, *low collateral* or *broad*, plus any cloud app Zscaler maps it to, and lists every loaded rule that uses that category (URL Filtering, Firewall, DNS, SSL Inspection, ATP setting) with its order and action. It needs a live tenant connection.
 
+## Policy changes: block it / allow it
+The simulator can now fix what it finds. It is **read-only until you switch on "Allow policy changes"** for the session, and every change is previewed call by call before anything is sent.
+
+- **Single result:** under the result tiles, *Change this result* offers **✅ Allow it…** for a blocked, cautioned or isolated destination, and **⛔ Block it…** for an allowed one. For a Client Connector bypass it explains that ZIA rules apply only once the bypass is removed.
+- **Bulk run:** tick rows in the results, or use the filter (result, "not as expected", category) to select across the whole run, then **⛔ Block selected…** or **✅ Allow selected…**.
+- **The wizard** asks, in order:
+  1. **Destinations:** editable, with optional CIDR collapsing.
+  2. **Where to apply:** 🌐 URL Filtering (web), 🧱 Firewall Filtering (all ports), 🔤 DNS Control, or 🛡 ATP (denylist to block, Security Exceptions allowlist to allow). It preselects the area that decided the traffic.
+  3. **Custom URL category:** create one or add to an existing one. URL Filtering uses it, and DNS Control uses it as both the requested-domain and resolved-IP category.
+  4. **Destination group:** create one or add to an existing one, for Firewall Filtering. Groups fill to 8,000 entries and extra groups are created automatically. Hostnames go in a separate FQDN group.
+  5. **Rule per area:** create a new rule with a name (31 characters max), a position you choose from the current rule list (the rule that currently decides is marked) and, for firewall blocks, Drop or Reset. Or reuse an existing rule that already uses the chosen category or group, so only the entries are added.
+  6. **Who:** everyone, or specific groups, departments, users and locations, searched live from ZIA.
+- **Preview** lists every API call with its body, plus warnings: limits, names, and an earlier catch-all rule with the opposite action that would stop the new rule ever applying.
+- **Save** runs the calls in order and stops at the first error. Changes are saved but not live: a *Changes pending activation* badge appears, and **Activate** is in the dialog and under **🧾 Policy changes**.
+- **Undo:** every change can be undone from 🧾 Policy changes (deletes what was created, restores what was edited). Each change is also written to `~/ZTP-Policy-Simulator/changes/<tenant>.jsonl`, with no credentials.
+- **Sample and offline sessions** apply changes to the in-memory policy only, so you can rehearse a change and re-simulate before touching a tenant.
+- **API client:** needs ZIA read/write scope in ZIdentity for changes. Payloads follow the ZeroTrustPanda Policy Wizard's verified templates. DNS rule category fields and creating a category with only CIDR ranges follow the API reference but haven't been tested on a live tenant yet, so try a single test IP first.
+
 ## Run
 - Windows: `ZTP-Policy-Simulator.exe` — serves http://127.0.0.1:8787 and opens your browser (`PORT`, `NO_OPEN=1` supported).
 - macOS: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`, then run it.
@@ -59,6 +77,7 @@ Single simulations of a single IP or host now also show its Zscaler category (`c
 - `src/zscaler.js` — OneAPI client and policy loader
 - `src/engine.js` — ordered rule evaluation and outcome model
 - `src/zcc.js` — Client Connector per-profile forwarding evaluation
+- `src/changes.js` — block/allow change plans, apply, undo, activation, in-memory ZIA for sample sessions
 - `src/recommend.js` — expected-vs-actual recommendations, category advice, rules per category
 - `src/bulk.js` — CSV parsing, CIDR/range expansion, batched category lookup, results CSV
 - `src/matchers.js` — wildcard domain, IP/CIDR/range, port and PAC matching

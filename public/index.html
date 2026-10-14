@@ -177,6 +177,33 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 12
 .lk { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 10px; background: var(--bg-input); }
 .lk .hd { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 14px; }
 .lk table { margin-top: 8px; }
+.modal-bg { position: fixed; inset: 0; background: rgba(5,8,15,.72); z-index: 300; display: flex; justify-content: center; align-items: center; padding: 24px 16px; }
+.modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); width: 100%; max-width: 860px; max-height: calc(100vh - 48px); display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.modal-hd { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.modal-hd h2 { font-size: 19px; font-weight: 600; }
+.modal-bd { padding: 1.25rem 1.5rem; overflow-y: auto; flex: 1; min-height: 0; }
+.modal-ft { padding: 1rem 1.5rem; border-top: 1px solid var(--border); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex-shrink: 0; }
+.step-blk { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 12px; background: var(--bg-input); }
+.step-blk > .t { font-size: 12px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 10px; }
+.step-blk input, .step-blk select, .step-blk textarea { background: var(--bg-secondary); }
+.radio-row { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 10px; font-size: 14px; }
+.radio-row label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px 3px 10px; border-radius: 14px; background: var(--accent-blue-dim); color: #bfdbfe; font-size: 12px; margin: 0 6px 6px 0; }
+.pill button { background: none; border: none; color: inherit; cursor: pointer; font-size: 14px; line-height: 1; padding: 0; }
+.dir-results { border: 1px solid var(--border); border-radius: var(--radius); max-height: 180px; overflow-y: auto; margin-top: 6px; background: var(--bg-secondary); }
+.dir-results div { padding: 6px 10px; font-size: 13px; cursor: pointer; } .dir-results div:hover { background: var(--bg-card-hover); }
+.plan-step { border-left: 3px solid var(--accent-blue); padding: 6px 10px; margin: 8px 0; background: var(--bg-secondary); border-radius: 0 var(--radius) var(--radius) 0; font-size: 13px; }
+.plan-step.done { border-left-color: var(--accent-green); } .plan-step.fail { border-left-color: var(--accent-red); }
+.plan-step pre { font-family: var(--mono); font-size: 11px; white-space: pre-wrap; word-break: break-all; color: var(--text-secondary); margin-top: 6px; max-height: 220px; overflow: auto; }
+.warn { font-size: 13px; color: #fcd34d; margin: 4px 0; } .errline { font-size: 13px; color: #fca5a5; margin: 4px 0; }
+.switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; user-select: none; }
+.switch input { display: none; } .switch .knob { width: 38px; height: 22px; border-radius: 11px; background: var(--border); position: relative; transition: background .15s; flex-shrink: 0; }
+.switch .knob::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .15s; }
+.switch input:checked + .knob { background: var(--accent-red); } .switch.blue input:checked + .knob { background: var(--accent-blue); } .switch input:checked + .knob::after { left: 19px; }
+.change-card { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.selbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.selbar select, .selbar input[type=text] { width: auto; padding: 7px 10px; font-size: 13px; }
+td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
 .hidden { display: none !important; }
 @media (max-width: 900px) { .sidebar { display: none; } .content { padding: 1rem; } .span2 { grid-column: auto; } .crit { grid-template-columns: 1fr; } .header { padding: 0 1rem; } }
 </style>
@@ -190,6 +217,7 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 12
       <span class="tag" id="ver">v</span>
     </div>
     <div class="header-right">
+      <div class="auth-badge hidden" id="pendingBadge" style="background:var(--accent-amber-dim);color:#fcd34d;cursor:pointer" title="Saved policy changes are not active yet"><span class="dot"></span>Changes pending activation</div>
       <div class="auth-badge info hidden" id="loadedBadge"><span class="dot"></span><span id="loadedText"></span></div>
       <div class="auth-badge disconnected" id="authBadge"><span class="dot"></span><span id="authText">Not connected</span></div>
     </div>
@@ -206,13 +234,14 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 12
         <div class="sidebar-section-title">Session</div>
         <button class="sidebar-link" id="btnSaveSnap" disabled>💾 Save policy snapshot</button>
         <button class="sidebar-link" id="btnOpenSnap">📂 Open saved snapshot…</button>
+        <button class="sidebar-link" id="btnChanges" disabled>🧾 Policy changes</button>
         <button class="sidebar-link" id="btnDiag" disabled>🩺 Diagnostics</button>
         <button class="sidebar-link" id="btnDisconnect" disabled>⏏ Disconnect</button>
         <input type="file" id="snapFile" accept=".json" class="hidden">
       </div>
       <div class="sidebar-section">
         <div class="sidebar-section-title">About</div>
-        <div class="form-hint" style="padding:0 .5rem">Read-only. Credentials stay in memory on this machine and are never written to disk.</div>
+        <div class="form-hint" style="padding:0 .5rem">Read-only unless you turn on policy changes, and every change is previewed first. Credentials stay in memory on this machine and are never written to disk.</div>
       </div>
     </aside>
     <main class="content">
@@ -330,6 +359,15 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 12
         </div>
       </section>
 
+      <section id="chgSec" class="hidden">
+        <div class="card">
+          <div class="card-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px"><div><h2>Policy changes</h2><p>Blocks and allows made from this tool. Every change is previewed first and can be undone. ZIA applies saved changes when they are activated.</p></div><button class="btn btn-ghost btn-sm" id="btnChgClose">Close</button></div>
+          <label class="switch"><input type="checkbox" id="writeToggle"><span class="knob"></span><span><b>Allow policy changes</b> for this session <span class="form-hint" id="writeHint"></span></span></label>
+          <div class="btn-group"><span class="msg" id="actStatus">Activation status: …</span><button class="btn btn-success btn-sm" id="btnActivate">Activate changes</button><span class="msg" id="actMsg"></span></div>
+        </div>
+        <div id="chgLog"></div>
+      </section>
+
       <section id="diagSec" class="hidden">
         <div class="card">
           <div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><div><h2>Diagnostics</h2><p>Every API call this session made.</p></div><button class="btn btn-ghost btn-sm" id="btnDiagClose">Close</button></div>
@@ -337,6 +375,53 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 12
         </div>
       </section>
     </main>
+  </div>
+</div>
+<div class="modal-bg hidden" id="chgModal" role="dialog" aria-modal="true" aria-labelledby="chgTitle">
+  <div class="modal">
+    <div class="modal-hd"><div><h2 id="chgTitle">Change policy</h2><div class="form-hint" id="chgSub"></div></div><button class="btn btn-ghost btn-sm" id="chgX">Cancel</button></div>
+    <div class="modal-bd" id="chgForm">
+      <div class="step-blk"><div class="t">1 · Destinations</div>
+        <div id="chgEntriesInfo" class="msg"></div>
+        <textarea id="chgEntries" style="margin-top:8px;min-height:90px" placeholder="One IP, CIDR, range or host per line"></textarea>
+        <label class="switch blue" style="margin-top:10px;font-size:13px"><input type="checkbox" id="chgCollapse" checked><span class="knob"></span><span>Collapse adjacent IPs into CIDRs (fewer entries)</span></label>
+      </div>
+      <div class="step-blk"><div class="t">2 · Where to apply</div>
+        <div class="chips" id="chgAreas">
+          <label class="chip"><input type="checkbox" value="url">🌐 URL Filtering (web)</label>
+          <label class="chip"><input type="checkbox" value="firewall">🧱 Firewall Filtering (all ports)</label>
+          <label class="chip"><input type="checkbox" value="dns">🔤 DNS Control</label>
+          <label class="chip"><input type="checkbox" value="atp"><span id="chgAtpLabel">🛡 ATP list</span></label>
+        </div>
+        <div class="form-hint" id="chgAreaHint" style="margin-top:8px"></div>
+      </div>
+      <div class="step-blk hidden" id="chgCatBlk"><div class="t">3 · Custom URL category <span style="text-transform:none;letter-spacing:0;font-weight:400">(used by URL Filtering and DNS Control)</span></div>
+        <div class="radio-row"><label><input type="radio" name="catMode" value="new" checked> Create a new category</label><label><input type="radio" name="catMode" value="existing"> Add to an existing category</label></div>
+        <input type="text" id="chgCatName" placeholder="Category name">
+        <select id="chgCatSel" class="hidden"></select>
+      </div>
+      <div class="step-blk hidden" id="chgGrpBlk"><div class="t">4 · Destination group <span style="text-transform:none;letter-spacing:0;font-weight:400">(used by Firewall Filtering; up to 8,000 entries per group, extra groups are created automatically)</span></div>
+        <div class="radio-row"><label><input type="radio" name="grpMode" value="new" checked> Create a new group</label><label><input type="radio" name="grpMode" value="existing"> Add to an existing group</label></div>
+        <input type="text" id="chgGrpName" placeholder="Group name">
+        <select id="chgGrpSel" class="hidden"></select>
+      </div>
+      <div id="chgRules"></div>
+      <div class="step-blk" id="chgWhoBlk"><div class="t">Who the new rules apply to</div>
+        <div class="msg" id="chgWhoNone">Everyone (all users, groups, departments and locations).</div>
+        <div id="chgWhoPills" style="margin-top:6px"></div>
+        <div class="grid" style="margin-top:8px">
+          <div><select id="chgDirType"><option value="groups">Groups</option><option value="departments">Departments</option><option value="users">Users</option><option value="locations">Locations</option></select></div>
+          <div class="span2"><input type="text" id="chgDirQ" placeholder="Search to add…" autocomplete="off"><div class="dir-results hidden" id="chgDirRes"></div></div>
+        </div>
+      </div>
+      <div id="chgPlan"></div>
+    </div>
+    <div class="modal-ft">
+      <button class="btn btn-primary" id="chgPreview">Preview changes</button>
+      <label class="switch hidden" id="chgWriteWrap" style="font-size:13px"><input type="checkbox" id="chgWrite"><span class="knob"></span><span id="chgWriteLbl">Allow policy changes for this session</span></label>
+      <button class="btn btn-success hidden" id="chgApply">Save to ZIA</button>
+      <span class="msg" id="chgMsg"></span>
+    </div>
   </div>
 </div>
 <script>
@@ -358,7 +443,7 @@ function go(n) {
   if (!canGo(n)) return;
   step = n;
   for (const k of [1, 2, 3]) $('step' + k).classList.toggle('hidden', k !== n);
-  $('diagSec').classList.add('hidden');
+  $('diagSec').classList.add('hidden'); $('chgSec').classList.add('hidden');
   if (n === 3 && mode === 'bulk') bulkHint();
   refreshSidebar(); window.scrollTo({ top: 0 });
 }
@@ -370,7 +455,7 @@ function refreshSidebar() {
     el.classList.toggle('completed', done && n !== step);
     el.querySelector('.step-num').textContent = done && n !== step ? '✓' : n;
   });
-  $('btnSaveSnap').disabled = !loaded; $('btnDiag').disabled = !sid || demo; $('btnDisconnect').disabled = !sid;
+  $('btnSaveSnap').disabled = !loaded; $('btnDiag').disabled = !sid || demo; $('btnDisconnect').disabled = !sid; $('btnChanges').disabled = !loaded;
 }
 document.querySelectorAll('.sidebar-item[data-step]').forEach((el) => el.onclick = () => go(+el.dataset.step));
 function setAuth(text, ok) { $('authText').textContent = text; $('authBadge').className = 'auth-badge ' + (ok ? 'connected' : 'disconnected'); }
@@ -419,7 +504,7 @@ $('btnDemo').onclick = async () => {
 };
 $('btnDisconnect').onclick = async () => {
   try { await api('/api/disconnect'); } catch {}
-  sid = null; demo = false; setAuth('Not connected', false); setLoaded(null); $('simOut').innerHTML = ''; $('bulkOut').innerHTML = ''; go(1);
+  sid = null; demo = false; setAuth('Not connected', false); setLoaded(null); $('simOut').innerHTML = ''; $('bulkOut').innerHTML = ''; $('pendingBadge').classList.add('hidden'); go(1);
 };
 $('btnOpenSnap').onclick = () => $('snapFile').click();
 $('snapFile').onchange = async () => {
@@ -568,7 +653,7 @@ $('btnSim').onclick = async () => {
     const errs = Object.keys((j.snapshot && j.snapshot.errors) || {});
     $('simOut').innerHTML = (errs.length ? `<div class="note" style="margin-bottom:10px">Not evaluated (failed to load): ${errs.map(esc).join(', ')}</div>` : '')
       + `<div class="tiles">${actionTile(s, c, j.modules)}${basedOnTile(s, c)}</div>`
-      + forwardingCard(j.modules.find((m) => m.module.startsWith('Forwarding')), s) + modulesCard(j.modules, s);
+      + changeCard(s, c, j.modules) + forwardingCard(j.modules.find((m) => m.module.startsWith('Forwarding')), s) + modulesCard(j.modules, s);
     $('simMsg').textContent = '';
   } catch (e) { msg('simMsg', e.message); }
   $('btnSim').disabled = false;
@@ -707,7 +792,7 @@ function renderBulk(j) {
       ? `<table><tr><th>Category</th><th style="text-align:right">Rows</th></tr>${s.topCategories.map((c) => `<tr><td class="mono">${esc(c.category)}</td><td style="text-align:right">${num(c.count)}</td></tr>`).join('')}</table>` : '';
     const pv = j.preview || [];
     const prev = pv.length
-      ? `<div class="tablewrap"><table><tr><th>Destination</th><th>Category</th><th>Result</th><th>Module · rule</th><th>${R ? 'Recommendation' : 'Could be blocked by'}</th></tr>${pv.map((r) => `<tr><td class="mono">${esc(r.target)}${r.label ? `<div class="form-hint">${esc(r.label)}</div>` : ''}</td><td class="mono">${esc(r.category || '')}${r.securityCategory ? ` <span class="badge b-red">${esc(r.securityCategory)}</span>` : ''}</td><td>${r.error ? '<span class="badge b-red">error</span>' : actBadge(r.action)}${r.expected ? `<div class="form-hint">expected ${esc(r.expected.toLowerCase())}</div>` : ''}</td><td>${r.error ? `<span class="err">${esc(r.error)}</span>` : `${esc(r.module || '')}${r.rule ? ` · <b>${esc(r.rule)}</b>` : ''}`}</td><td class="form-hint">${R ? (r.area ? `<span class="area-tag">${esc(r.area)}</span> ` : '') + esc(r.recommendation || '') : esc(r.couldBlock || '')}</td></tr>`).join('')}</table></div>${pv.length >= 200 ? '<div class="form-hint" style="margin-top:6px">Showing the first 200 flagged rows. The CSV has all of them.</div>' : ''}`
+      ? `<div class="tablewrap"><table><tr><th class="cb"><input type="checkbox" id="selAllShown" title="Tick all shown rows"></th><th>Destination</th><th>Category</th><th>Result</th><th>Module · rule</th><th>${R ? 'Recommendation' : 'Could be blocked by'}</th></tr>${pv.map((r) => `<tr><td class="cb">${r.error ? '' : `<input type="checkbox" class="rowSel" data-row="${esc(r.row)}">`}</td><td class="mono">${esc(r.target)}${r.label ? `<div class="form-hint">${esc(r.label)}</div>` : ''}</td><td class="mono">${esc(r.category || '')}${r.securityCategory ? ` <span class="badge b-red">${esc(r.securityCategory)}</span>` : ''}</td><td>${r.error ? '<span class="badge b-red">error</span>' : actBadge(r.action)}${r.expected ? `<div class="form-hint">expected ${esc(r.expected.toLowerCase())}</div>` : ''}</td><td>${r.error ? `<span class="err">${esc(r.error)}</span>` : `${esc(r.module || '')}${r.rule ? ` · <b>${esc(r.rule)}</b>` : ''}`}</td><td class="form-hint">${R ? (r.area ? `<span class="area-tag">${esc(r.area)}</span> ` : '') + esc(r.recommendation || '') : esc(r.couldBlock || '')}</td></tr>`).join('')}</table></div>${pv.length >= 200 ? '<div class="form-hint" style="margin-top:6px">Showing the first 200 flagged rows. The CSV has all of them.</div>' : ''}`
       : '<div class="empty">Nothing flagged: every row was allowed and no condition would block it.</div>';
     const AREA_ICON = { ATP: '🛡', Firewall: '🧱', 'URL Filtering': '🌐', DNS: '🔤', 'Client Connector': '💻', 'Cloud App': '☁️' };
     const recCard = R ? `<div class="card"><div class="card-header"><h3>Recommendations</h3><p style="font-size:13px">Rows checked against the expected result, and the best place in policy to fix the ones that don't match.</p></div>
@@ -716,14 +801,306 @@ function renderBulk(j) {
       ${R.categories.length ? `<div class="section-title" style="margin-top:18px">By category</div><div class="tablewrap"><table><tr><th>Expected</th><th>Category</th><th style="text-align:right">Rows</th><th>Recommendation</th></tr>${R.categories.map((c) => `<tr><td>${actBadge(c.expected)}</td><td class="mono">${esc(c.category)} ${c.kind !== 'none' ? `<span class="badge kind-${esc(c.kind)}">${{ security: 'threat', risky: 'low collateral', broad: 'broad' }[c.kind] || ''}</span>` : ''}</td><td style="text-align:right">${num(c.count)}</td><td>${esc(c.advice)}</td></tr>`).join('')}</table></div>` : ''}</div>` : '';
     more = recCard + `<div class="two"><div class="card"><div class="card-header"><h3>What decided the rows that weren't allowed</h3></div>${rules}</div>
       <div class="card"><div class="card-header"><h3>Zscaler categories</h3><p style="font-size:13px">${num(s.lookedUp)} rows categorised by Zscaler lookup</p></div>${cats}</div></div>
-      <div class="card"><div class="card-header"><h3>${R ? "Rows that don't match the expected result" : 'Flagged rows'}</h3><p style="font-size:13px">${R ? 'Each with the recommended fix.' : 'Blocked, bypassed, isolated or cautioned, plus allowed rows that a condition such as user or location could block.'}</p></div>${prev}</div>`;
+      <div class="card"><div class="card-header"><h3>${R ? "Rows that don't match the expected result" : 'Flagged rows'}</h3><p style="font-size:13px">${R ? 'Each with the recommended fix.' : 'Blocked, bypassed, isolated or cautioned, plus allowed rows that a condition such as user or location could block.'}</p></div>${selBar(R)}${prev}</div>`;
   }
+  if (!running && j.done) setTimeout(updateSelCount, 0);
   $('bulkOut').innerHTML = `<div class="card"><div class="card-header"><h3>${running ? '<span class="spinner"></span> ' : ''}${phase}</h3></div><div class="progress"><div style="width:${pct.toFixed(1)}%"></div></div>${notes.map((n) => `<div class="note">${n}</div>`).join('')}<div class="stats">${stats}</div>${dl}</div>${more}`;
 }
+
+// ---------- policy changes ----------
+const AREA_OF = { 'URL Filtering': 'url', Firewall: 'firewall', 'DNS Control': 'dns', 'Advanced Threat Protection': 'atp' };
+const AREA_NAME = { url: 'URL Filtering', firewall: 'Firewall Filtering', dns: 'DNS Control', atp: 'ATP' };
+const RULE_SHORT = { url: 'URL', firewall: 'FW', dns: 'DNS' };
+let CHG = null;
+
+function changeCard(s, c, modules) {
+  const p = s.primary; const t = c.target;
+  if (!t || t.isWildcard && !t.host.replace(/^\*\.?/, '')) return '';
+  const entry = t.isIp ? t.host : t.host + (t.path && t.path !== '/' ? t.path : '');
+  const mod = modules.find((m) => m.module === p.module);
+  window.__lastChange = { entry, decider: { area: AREA_OF[p.module], module: p.module, ruleName: p.rule, ruleId: mod && mod.decidingRule ? mod.decidingRule.id : null } };
+  let text, btn;
+  if (['BLOCK', 'CAUTION', 'ISOLATE'].includes(p.action)) { text = `${p.action === 'BLOCK' ? 'Blocked' : p.action === 'CAUTION' ? 'Cautioned' : 'Isolated'} by ${esc(p.module)}${p.rule ? ` rule <b>${esc(p.rule)}</b>` : ''}.`; btn = `<button class="btn btn-success" onclick="openChange({intent:'ALLOW', entries:[window.__lastChange.entry], decider: window.__lastChange.decider, source:'single'})">✅ Allow it…</button>`; }
+  else if (p.action === 'BYPASS') { text = 'Bypassed by Client Connector, so ZIA never sees it. A ZIA rule only takes effect once the app profile stops bypassing it.'; btn = `<button class="btn btn-ghost" onclick="openChange({intent:'BLOCK', entries:[window.__lastChange.entry], decider: window.__lastChange.decider, source:'single'})">⛔ Block it in ZIA anyway…</button>`; }
+  else { text = `Allowed${p.rule ? ` by ${esc(p.module)} rule <b>${esc(p.rule)}</b>` : ''}.`; btn = `<button class="btn btn-primary" style="background:var(--accent-red)" onclick="openChange({intent:'BLOCK', entries:[window.__lastChange.entry], decider: window.__lastChange.decider, source:'single'})">⛔ Block it…</button>`; }
+  return `<div class="card"><div class="change-card"><div><h3 style="font-size:15px;margin-bottom:2px">Change this result</h3><div class="msg">${text} Create or update a custom category, destination group and rule for <span class="mono">${esc(entry)}</span>.</div></div>${btn}</div></div>`;
+}
+
+function selBar(R) {
+  return `<div class="selbar" id="selBar"><span class="msg">Select:</span>
+    <select id="selResult"><option value="">Any result</option><option value="ALLOWED"${R ? '' : ' selected'}>Allowed</option><option value="BLOCKED">Blocked</option><option value="BYPASSED">Bypassed</option><option value="CAUTIONED">Cautioned</option><option value="ISOLATED">Isolated</option></select>
+    ${R ? '<label class="msg" style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" id="selMismatch" checked> Not as expected only</label>' : ''}
+    <input type="text" id="selCat" placeholder="Category (optional)" style="width:190px">
+    <span class="msg" id="selCount"></span>
+    <button class="btn btn-sm" style="background:var(--accent-red);color:#fff" id="btnSelBlock">⛔ Block selected…</button>
+    <button class="btn btn-success btn-sm" id="btnSelAllow">✅ Allow selected…</button></div>
+    <div class="form-hint" style="margin:-4px 0 10px">Tick rows below to pick specific ones; with none ticked, the filter selects across every row in the run.</div>`;
+}
+function selQuery() {
+  const rows = [...document.querySelectorAll('.rowSel:checked')].map((x) => x.dataset.row);
+  const f = { results: $('selResult') && $('selResult').value ? [$('selResult').value] : [], mismatch: !!($('selMismatch') && $('selMismatch').checked), category: $('selCat') ? $('selCat').value.trim().toUpperCase() : '' };
+  return { rows, filter: rows.length ? {} : f };
+}
+let selTimer = null;
+async function updateSelCount() {
+  if (!$('selCount')) return;
+  clearTimeout(selTimer);
+  selTimer = setTimeout(async () => {
+    try { const j = await api('/api/bulk/select', selQuery()); $('selCount').textContent = `${num(j.count)} row${j.count === 1 ? '' : 's'} selected (${num(j.blocked)} blocked, ${num(j.allowed)} allowed${j.bypassed ? `, ${num(j.bypassed)} bypassed` : ''})`; }
+    catch (e) { $('selCount').textContent = e.message; }
+  }, 150);
+}
+$('bulkOut').addEventListener('change', (e) => {
+  if (e.target.id === 'selAllShown') document.querySelectorAll('.rowSel').forEach((x) => { x.checked = e.target.checked; });
+  if (['selResult', 'selMismatch', 'selAllShown'].includes(e.target.id) || e.target.classList.contains('rowSel')) updateSelCount();
+});
+$('bulkOut').addEventListener('input', (e) => { if (e.target.id === 'selCat') updateSelCount(); });
+$('bulkOut').addEventListener('click', async (e) => {
+  const intent = e.target.id === 'btnSelBlock' ? 'BLOCK' : e.target.id === 'btnSelAllow' ? 'ALLOW' : null;
+  if (!intent) return;
+  try {
+    const j = await api('/api/bulk/select', selQuery());
+    if (!j.count) { $('selCount').textContent = 'Nothing selected.'; return; }
+    const d = j.deciders[0];
+    openChange({ intent, entries: j.targets, source: 'bulk', decider: intent === 'ALLOW' && d ? { area: AREA_OF[d.module], module: d.module, ruleName: d.rule } : null,
+      note: intent === 'ALLOW' && j.deciders.length > 1 ? `Blocked by ${j.deciders.length} different rules; the most common is ${d.module} "${d.rule}" (${num(d.count)}).` : '' });
+  } catch (err) { $('selCount').textContent = err.message; }
+});
+
+async function openChange(o) {
+  let ctx;
+  try { ctx = await api('/api/changes/context'); } catch (e) { alertMsg(e.message); return; }
+  CHG = Object.assign({ crit: { groups: [], departments: [], users: [], locations: [] }, ruleState: {} }, o, { ctx });
+  if (CHG.decider && CHG.decider.ruleName && !CHG.decider.ruleId && ctx.rules[CHG.decider.area]) {
+    const r = ctx.rules[CHG.decider.area].find((x) => x.name === CHG.decider.ruleName); if (r) CHG.decider.ruleId = r.id;
+  }
+  const n = o.entries.length, B = o.intent === 'BLOCK';
+  $('chgTitle').textContent = `${B ? '⛔ Block' : '✅ Allow'} ${num(n)} destination${n === 1 ? '' : 's'}`;
+  $('chgSub').innerHTML = `Tenant: <b>${esc(ctx.tenant)}</b>${ctx.mock ? ' · <span style="color:#fcd34d">sample mode: changes apply to the in-memory policy only, nothing is sent to Zscaler</span>' : ''}${o.note ? '<br>' + esc(o.note) : ''}`;
+  const big = n > 5000;
+  $('chgEntries').value = big ? '' : o.entries.join('\n');
+  $('chgEntries').classList.toggle('hidden', big);
+  $('chgEntriesInfo').innerHTML = big ? `${num(n)} destinations from the bulk run (too many to edit here): <span class="mono">${o.entries.slice(0, 6).map(esc).join(', ')} …</span>` : 'Edit the list if needed.';
+  const hasIp = o.entries.some((x) => /^\d/.test(x)), hasHost = o.entries.some((x) => !/^\d/.test(x));
+  const dArea = o.decider && o.decider.area;
+  const pick = B ? { url: true, firewall: hasIp, dns: hasHost, atp: false } : { url: !dArea || dArea === 'url', firewall: dArea === 'firewall', dns: dArea === 'dns', atp: dArea === 'atp' };
+  document.querySelectorAll('#chgAreas input').forEach((cb) => { cb.checked = !!pick[cb.value]; cb.parentNode.classList.toggle('on', cb.checked); });
+  $('chgAtpLabel').textContent = B ? '🛡 ATP denylist (applies to everyone)' : '🛡 ATP allowlist (Security Exceptions)';
+  $('chgAreaHint').innerHTML = !B && o.decider && o.decider.module
+    ? `Currently blocked by <b>${esc(o.decider.module)}</b>${o.decider.ruleName ? ` rule "${esc(o.decider.ruleName)}"` : ''}. ${dArea === 'atp' ? 'ATP blocks are lifted with a Security Exceptions (allowlist) entry.' : 'Place the allow rule above that rule.'}`
+    : B ? 'URL Filtering covers web traffic. Firewall covers every port and protocol. DNS Control stops name resolution. The ATP denylist applies to everyone with no rule.' : '';
+  const nm = B ? 'Sim Block List' : 'Sim Allow List';
+  $('chgCatName').value = nm; $('chgGrpName').value = nm;
+  document.querySelector('input[name=catMode][value=new]').checked = true; document.querySelector('input[name=grpMode][value=new]').checked = true;
+  $('chgCatSel').innerHTML = `<option value="">Choose a custom URL category…</option>` + ctx.categories.map((c) => `<option value="${esc(c.id)}">${esc(c.name)} (${num(c.count)} entries)</option>`).join('');
+  $('chgGrpSel').innerHTML = `<option value="">Choose a destination group…</option>` + ctx.groups.filter((g) => g.type === 'DSTN_IP').map((g) => `<option value="${esc(g.id)}">${esc(g.name)} (${num(g.count)} of 8,000)</option>`).join('');
+  $('chgRules').innerHTML = ''; syncModes(); renderWho(); $('chgPlan').innerHTML = ''; $('chgMsg').textContent = '';
+  $('chgApply').classList.add('hidden'); $('chgWriteWrap').classList.add('hidden'); $('chgPreview').classList.remove('hidden');
+  $('chgForm').querySelectorAll('input,select,textarea,button').forEach((x) => { x.disabled = false; });
+  $('chgPreview').disabled = false; $('chgApply').disabled = false; CHG.plan = null;
+  $('chgModal').classList.remove('hidden'); document.body.style.overflow = 'hidden';
+}
+function alertMsg(m) { const t = $(mode === 'bulk' ? 'bulkMsg' : 'simMsg'); if (t) msg(t.id, m); }
+function closeChange() { $('chgModal').classList.add('hidden'); document.body.style.overflow = ''; }
+$('chgX').onclick = closeChange;
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('chgModal').classList.contains('hidden')) closeChange(); });
+function areasOn() { return Object.fromEntries([...document.querySelectorAll('#chgAreas input')].map((cb) => [cb.value, cb.checked])); }
+function syncModes() {
+  const a = areasOn();
+  $('chgCatBlk').classList.toggle('hidden', !(a.url || a.dns));
+  $('chgGrpBlk').classList.toggle('hidden', !a.firewall);
+  const cm = document.querySelector('input[name=catMode]:checked').value, gm = document.querySelector('input[name=grpMode]:checked').value;
+  $('chgCatName').classList.toggle('hidden', cm !== 'new'); $('chgCatSel').classList.toggle('hidden', cm !== 'existing');
+  $('chgGrpName').classList.toggle('hidden', gm !== 'new'); $('chgGrpSel').classList.toggle('hidden', gm !== 'existing');
+  $('chgWhoBlk').classList.toggle('hidden', !(a.url || a.firewall || a.dns));
+  renderRules();
+}
+document.querySelectorAll('#chgAreas input').forEach((cb) => cb.addEventListener('change', syncModes));
+document.querySelectorAll('input[name=catMode],input[name=grpMode]').forEach((r) => r.addEventListener('change', syncModes));
+['chgCatSel', 'chgGrpSel'].forEach((id) => $(id).addEventListener('change', renderRules));
+
+function saveRuleState() {
+  for (const a of ['url', 'firewall', 'dns']) {
+    if (!$('rm_' + a)) continue;
+    CHG.ruleState[a] = { mode: (document.querySelector(`input[name=rm_${a}]:checked`) || {}).value || 'new', name: $('rn_' + a).value, place: $('rp_' + a).value, reuse: $('rr_' + a) ? $('rr_' + a).value : '', fwAction: $('ra_' + a) ? $('ra_' + a).value : 'BLOCK_DROP' };
+  }
+}
+function renderRules() {
+  if (!CHG) return;
+  saveRuleState();
+  const a = areasOn(), B = CHG.intent === 'BLOCK', ctx = CHG.ctx;
+  const catId = document.querySelector('input[name=catMode]:checked').value === 'existing' ? $('chgCatSel').value : null;
+  const grpId = document.querySelector('input[name=grpMode]:checked').value === 'existing' ? $('chgGrpSel').value : null;
+  const want = (act) => (B ? /BLOCK/.test(act || '') : /^ALLOW/.test(act || ''));
+  let html = '', i = 5;
+  for (const ar of ['url', 'firewall', 'dns']) {
+    if (!a[ar]) continue;
+    const rules = ctx.rules[ar] || [];
+    const reusable = rules.filter((r) => want(r.action) && (ar === 'firewall' ? grpId && r.groups.includes(String(grpId)) : catId && r.cats.includes(String(catId))));
+    const st = CHG.ruleState[ar] || {};
+    const mode = st.mode === 'reuse' && reusable.length ? 'reuse' : 'new';
+    const name = st.name || `Sim-${B ? 'Block' : 'Allow'}-${RULE_SHORT[ar]}`;
+    const dec = CHG.decider && CHG.decider.area === ar ? String(CHG.decider.ruleId) : null;
+    const opts = `<option value="">Choose where this rule goes…</option><option value="TOP"${st.place === 'TOP' ? ' selected' : ''}>Top of the policy (order 1)</option>`
+      + rules.map((r) => `<option value="${esc(r.id)}"${String(st.place) === String(r.id) ? ' selected' : ''}>Above #${esc(r.order)} ${esc(r.name)} (${esc(r.action)})${String(r.id) === dec ? ' ← currently decides this traffic' : ''}${r.state === 'DISABLED' ? ' [disabled]' : ''}</option>`).join('')
+      + `<option value="BOTTOM"${st.place === 'BOTTOM' ? ' selected' : ''}>Bottom (just above the default rule)</option>`;
+    html += `<div class="step-blk" id="rm_${ar}"><div class="t">${i++} · ${AREA_NAME[ar]} rule</div>
+      <div class="radio-row"><label><input type="radio" name="rm_${ar}" value="new"${mode === 'new' ? ' checked' : ''}> Create a new ${B ? 'block' : 'allow'} rule</label>
+        <label title="${reusable.length ? '' : 'Pick an existing ' + (ar === 'firewall' ? 'group' : 'category') + ' above that a ' + (B ? 'block' : 'allow') + ' rule already uses'}"><input type="radio" name="rm_${ar}" value="reuse"${mode === 'reuse' ? ' checked' : ''}${reusable.length ? '' : ' disabled'}> Use an existing rule${reusable.length ? ` (${reusable.length})` : ''}</label></div>
+      <div class="grid${mode === 'new' ? '' : ' hidden'}">
+        <div><label class="form-label">Rule name (max ${ctx.limits.nameMax} characters)</label><input type="text" id="rn_${ar}" maxlength="${ctx.limits.nameMax}" value="${esc(name)}"></div>
+        <div class="span2"><label class="form-label">Position</label><select id="rp_${ar}">${opts}</select></div>
+        ${ar === 'firewall' && B ? `<div><label class="form-label">Block action</label><select id="ra_${ar}"><option value="BLOCK_DROP"${st.fwAction !== 'BLOCK_RESET' ? ' selected' : ''}>Drop</option><option value="BLOCK_RESET"${st.fwAction === 'BLOCK_RESET' ? ' selected' : ''}>Reset</option></select></div>` : ''}
+      </div>
+      <div class="${mode === 'reuse' ? '' : 'hidden'}"><select id="rr_${ar}">${reusable.map((r) => `<option value="${esc(r.id)}"${String(st.reuse) === String(r.id) ? ' selected' : ''}>#${esc(r.order)} ${esc(r.name)} (${esc(r.action)})</option>`).join('')}</select>
+        <div class="form-hint" style="margin-top:6px">The entries are added to the ${ar === 'firewall' ? 'group' : 'category'}; this rule already uses it, so no new rule is created.</div></div>
+    </div>`;
+  }
+  $('chgRules').innerHTML = html;
+  $('chgRules').querySelectorAll('input[type=radio]').forEach((r) => r.addEventListener('change', renderRules));
+}
+// Criteria picker
+function renderWho() {
+  const all = Object.entries(CHG.crit).flatMap(([k, v]) => v.map((x) => ({ k, x })));
+  $('chgWhoNone').classList.toggle('hidden', all.length > 0);
+  $('chgWhoPills').innerHTML = all.map(({ k, x }) => `<span class="pill">${{ groups: '👥', departments: '🏢', users: '👤', locations: '📍' }[k]} ${esc(x.name)}<button data-k="${k}" data-id="${esc(x.id)}" title="Remove">×</button></span>`).join('');
+}
+$('chgWhoPills').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  CHG.crit[b.dataset.k] = CHG.crit[b.dataset.k].filter((x) => String(x.id) !== b.dataset.id); renderWho();
+});
+let dirTimer = null;
+$('chgDirQ').addEventListener('input', () => { clearTimeout(dirTimer); dirTimer = setTimeout(dirSearch, 250); });
+$('chgDirQ').addEventListener('focus', dirSearch);
+$('chgDirType').addEventListener('change', dirSearch);
+async function dirSearch() {
+  const type = $('chgDirType').value, q = $('chgDirQ').value.trim();
+  let res = [];
+  try {
+    if (type === 'locations') res = CHG.ctx.locations.filter((l) => !q || l.name.toLowerCase().includes(q.toLowerCase())).slice(0, 50);
+    else res = (await api('/api/directory', { type, q })).results;
+  } catch (e) { res = []; $('chgDirRes').innerHTML = `<div class="err">${esc(e.message)}</div>`; $('chgDirRes').classList.remove('hidden'); return; }
+  $('chgDirRes').innerHTML = res.length ? res.map((x) => `<div data-id="${esc(x.id)}" data-name="${esc(x.name)}">${esc(x.name)}${x.email && x.email !== x.name ? ` <span class="form-hint">${esc(x.email)}</span>` : ''}</div>`).join('') : `<div class="form-hint">${q ? 'No matches' : 'Type to search'}</div>`;
+  $('chgDirRes').classList.remove('hidden');
+}
+$('chgDirRes').addEventListener('mousedown', (e) => {
+  const d = e.target.closest('div[data-id]'); if (!d) return;
+  const k = $('chgDirType').value, list = CHG.crit[k];
+  if (!list.some((x) => String(x.id) === d.dataset.id)) list.push({ id: isNaN(+d.dataset.id) ? d.dataset.id : +d.dataset.id, name: d.dataset.name });
+  renderWho(); $('chgDirQ').value = ''; $('chgDirRes').classList.add('hidden');
+});
+$('chgDirQ').addEventListener('blur', () => setTimeout(() => $('chgDirRes').classList.add('hidden'), 150));
+
+function buildSpec() {
+  saveRuleState();
+  const a = areasOn();
+  const entries = $('chgEntries').classList.contains('hidden') ? CHG.entries : $('chgEntries').value.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
+  const cm = document.querySelector('input[name=catMode]:checked').value, gm = document.querySelector('input[name=grpMode]:checked').value;
+  const rules = {};
+  for (const ar of ['url', 'firewall', 'dns']) {
+    const st = CHG.ruleState[ar] || {};
+    rules[ar] = { enabled: !!a[ar], mode: st.mode === 'reuse' ? 'reuse' : 'new', name: st.name, placeAbove: st.place, ruleId: st.reuse, blockAction: st.fwAction };
+  }
+  return { intent: CHG.intent, entries, collapse: $('chgCollapse').checked,
+    category: { mode: cm, id: $('chgCatSel').value, name: $('chgCatName').value },
+    ipGroup: { mode: gm, id: $('chgGrpSel').value, name: $('chgGrpName').value },
+    rules, atp: { enabled: !!a.atp }, criteria: CHG.crit };
+}
+$('chgPreview').onclick = async () => {
+  const spec = buildSpec();
+  for (const ar of ['url', 'firewall', 'dns']) if (spec.rules[ar].enabled && spec.rules[ar].mode === 'new' && !spec.rules[ar].placeAbove) { $('chgMsg').innerHTML = `<span class="err">Choose a position for the ${AREA_NAME[ar]} rule.</span>`; $('rp_' + ar).focus(); return; }
+  $('chgPreview').disabled = true; $('chgMsg').innerHTML = '<span class="spinner"></span> Building preview…';
+  try {
+    const p = await api('/api/changes/plan', { spec });
+    CHG.plan = p;
+    $('chgPlan').innerHTML = `<div class="step-blk" style="border-color:var(--accent-blue)"><div class="t">Preview: what will be sent to ${esc(p.tenant)}</div>
+      <div class="msg" style="margin-bottom:6px">${num(p.counts.ips)} single IP${p.counts.ips === 1 ? '' : 's'}, ${num(p.counts.cidrs)} CIDR${p.counts.cidrs === 1 ? '' : 's'}${p.counts.hosts ? `, ${num(p.counts.hosts)} host${p.counts.hosts === 1 ? '' : 's'}` : ''} (${num(p.counts.addresses)} IP addresses)${p.counts.invalid ? `, ${num(p.counts.invalid)} skipped` : ''}.</div>
+      ${p.errors.map((x) => `<div class="errline">✗ ${esc(x)}</div>`).join('')}${p.warnings.map((x) => `<div class="warn">⚠ ${esc(x)}</div>`).join('')}
+      <ul style="margin:6px 0 4px 18px;font-size:14px">${p.summary.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
+      ${p.errors.length ? '' : p.steps.map((st, i) => `<div class="plan-step"><b>${i + 1}.</b> ${esc(st.title)}<details><summary class="mono">${esc(st.method)} ${esc(st.path)}</summary><pre>${esc(JSON.stringify(st.body, null, 1))}</pre></details></div>`).join('')}
+      ${p.steps.length ? `<div class="form-hint" style="margin-top:8px">${p.mock ? 'Sample mode: applied to the in-memory policy so you can re-simulate.' : 'Saved changes are not live until activated. You can undo this change from Policy changes.'}</div>` : ''}</div>`;
+    const ok = !p.errors.length && p.steps.length;
+    $('chgApply').classList.toggle('hidden', !ok);
+    $('chgWriteWrap').classList.toggle('hidden', !ok || p.writeEnabled);
+    $('chgWrite').checked = !!p.writeEnabled;
+    $('chgWriteLbl').textContent = p.mock ? 'Allow changes to the sample policy for this session' : `Allow policy changes in ${p.tenant} for this session`;
+    $('chgApply').textContent = p.mock ? `Apply ${p.steps.length} step${p.steps.length === 1 ? '' : 's'} to sample policy` : `Save ${p.steps.length} step${p.steps.length === 1 ? '' : 's'} to ZIA`;
+    $('chgApply').disabled = !p.writeEnabled;
+    $('chgMsg').textContent = '';
+    $('chgPlan').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) { $('chgMsg').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+  $('chgPreview').disabled = false;
+};
+$('chgWrite').addEventListener('change', async () => {
+  try { const j = await api('/api/changes/mode', { enable: $('chgWrite').checked }); $('chgApply').disabled = !j.writeEnabled; $('writeToggle').checked = j.writeEnabled; } catch (e) { $('chgMsg').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+});
+$('chgForm').addEventListener('input', (e) => { if (CHG && CHG.plan && !e.target.closest('#chgPlan') && e.target.id !== 'chgDirQ') { $('chgApply').classList.add('hidden'); $('chgWriteWrap').classList.add('hidden'); $('chgMsg').textContent = 'Changed: preview again before saving.'; CHG.plan = null; } });
+$('chgForm').addEventListener('change', (e) => { if (CHG && CHG.plan && !e.target.closest('#chgPlan') && e.target.id !== 'chgDirType') { $('chgApply').classList.add('hidden'); $('chgWriteWrap').classList.add('hidden'); $('chgMsg').textContent = 'Changed: preview again before saving.'; CHG.plan = null; } });
+$('chgApply').onclick = async () => {
+  if (!CHG.plan) return;
+  $('chgApply').disabled = true; $('chgPreview').disabled = true; $('chgMsg').innerHTML = '<span class="spinner"></span> Saving…';
+  try {
+    const r = await api('/api/changes/apply', { planId: CHG.plan.id, confirm: true });
+    const e = r.entry;
+    $('chgForm').querySelectorAll('input,select,textarea,button').forEach((x) => { if (!x.closest('#chgPlan')) x.disabled = true; });
+    $('chgPlan').innerHTML = `<div class="step-blk" style="border-color:${e.failed ? 'var(--accent-red)' : 'var(--accent-green)'}"><div class="t">${e.failed ? 'Stopped on an error' : r.mock ? 'Applied to the sample policy' : 'Saved to ZIA'}</div>
+      ${e.done.map((d) => `<div class="plan-step done">✓ ${esc(d.title)}</div>`).join('')}
+      ${e.failed ? `<div class="plan-step fail">✗ ${esc(e.failed.title)}<div class="errline">${esc(e.failed.error)}</div></div><div class="msg">Steps after this one were not run. Undo removes the ${e.done.length} completed step(s).</div>` : ''}
+      <div class="btn-group">${r.activation === 'PENDING' ? '<button class="btn btn-success btn-sm" id="chgActivate">Activate now</button>' : ''}<button class="btn btn-ghost btn-sm" id="chgUndo">Undo this change</button>${CHG.source === 'single' ? '<button class="btn btn-ghost btn-sm" id="chgResim">Re-run the simulation</button>' : ''}<button class="btn btn-ghost btn-sm" id="chgDone">Close</button></div>
+      <div class="msg" id="chgAfter">${r.activation === 'PENDING' ? 'Activation pending: ZIA enforces the change once it is activated (here or in the console).' : ''}</div></div>`;
+    CHG.lastEntry = e.id;
+    $('chgApply').classList.add('hidden'); $('chgWriteWrap').classList.add('hidden'); $('chgPreview').classList.add('hidden'); $('chgMsg').textContent = '';
+    setPending(r.activation);
+    $('chgDone').onclick = closeChange;
+    if ($('chgResim')) $('chgResim').onclick = () => { closeChange(); $('btnSim').click(); };
+    if ($('chgActivate')) $('chgActivate').onclick = async () => { try { const a = await api('/api/changes/activate'); setPending(a.status); $('chgAfter').textContent = `Activation status: ${a.status}`; $('chgActivate').remove(); } catch (err) { $('chgAfter').innerHTML = `<span class="err">${esc(err.message)}</span>`; } };
+    $('chgUndo').onclick = async () => { try { const u = await api('/api/changes/undo', { id: e.id }); setPending(u.activation); $('chgAfter').innerHTML = u.entry.undone ? 'Undone.' : `<span class="err">Undo incomplete: ${esc((u.entry.undoResults || []).filter((x) => !x.ok).map((x) => x.title + ': ' + x.error).join('; '))}</span>`; $('chgUndo').remove(); } catch (err) { $('chgAfter').innerHTML = `<span class="err">${esc(err.message)}</span>`; } };
+  } catch (err) { $('chgMsg').innerHTML = `<span class="err">${esc(err.message)}</span>`; $('chgApply').disabled = false; $('chgPreview').disabled = false; }
+};
+
+// Changes panel, activation, pending badge
+function setPending(st) { $('pendingBadge').classList.toggle('hidden', st !== 'PENDING'); if ($('actStatus')) $('actStatus').innerHTML = `Activation status: <b>${esc(st || 'unknown')}</b>`; }
+async function refreshStatus() { try { const j = await api('/api/changes/status'); setPending(j.status); } catch {} }
+async function openChanges() {
+  for (const k of [1, 2, 3]) $('step' + k).classList.add('hidden');
+  $('diagSec').classList.add('hidden'); $('chgSec').classList.remove('hidden');
+  try {
+    const m = await api('/api/changes/mode');
+    $('writeToggle').checked = m.writeEnabled;
+    $('writeHint').textContent = m.mock ? '(sample policy, in memory only)' : `(tenant ${m.tenant})`;
+  } catch {}
+  refreshStatus(); renderLog();
+}
+async function renderLog() {
+  try {
+    const { entries } = await api('/api/changes/log');
+    $('chgLog').innerHTML = entries.length ? entries.map((e) => `<div class="card"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div>${actBadge(e.intent)} <span class="form-hint">${esc(new Date(e.at).toLocaleString())}</span>${e.undone ? ' <span class="badge b-slate">undone</span>' : ''}${e.failed ? ' <span class="badge b-red">partly applied</span>' : ''}</div>
+      ${e.undone ? '' : `<button class="btn btn-ghost btn-sm" data-undo="${esc(e.id)}">Undo</button>`}</div>
+      <ul style="margin:8px 0 0 18px;font-size:14px">${e.summary.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
+      ${e.failed ? `<div class="errline">✗ ${esc(e.failed.title)}: ${esc(e.failed.error)}</div>` : ''}
+      <details><summary>${e.done.length} API call${e.done.length === 1 ? '' : 's'}</summary>${e.done.map((d) => `<div class="mono form-hint">${esc(d.method)} ${esc(d.path)}: ${esc(d.title)}</div>`).join('')}</details></div>`).join('')
+      : '<div class="card"><div class="empty">No changes yet. Use "Block it" / "Allow it" on a simulation result, or select rows in a bulk test.</div></div>';
+  } catch (e) { $('chgLog').innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
+}
+$('chgLog').addEventListener('click', async (e) => {
+  const id = e.target.dataset && e.target.dataset.undo; if (!id) return;
+  e.target.disabled = true;
+  try { const u = await api('/api/changes/undo', { id }); setPending(u.activation); renderLog(); } catch (err) { e.target.disabled = false; $('actMsg').innerHTML = `<span class="err">${esc(err.message)}</span>`; }
+});
+$('btnChanges').onclick = openChanges;
+$('pendingBadge').onclick = openChanges;
+$('btnChgClose').onclick = () => go(step);
+$('writeToggle').addEventListener('change', async () => { try { const j = await api('/api/changes/mode', { enable: $('writeToggle').checked }); $('writeToggle').checked = j.writeEnabled; } catch (e) { $('actMsg').innerHTML = `<span class="err">${esc(e.message)}</span>`; } });
+$('btnActivate').onclick = async () => {
+  $('btnActivate').disabled = true; $('actMsg').innerHTML = '<span class="spinner"></span>';
+  try { const a = await api('/api/changes/activate'); setPending(a.status); $('actMsg').textContent = `Activation: ${a.status}`; } catch (e) { $('actMsg').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+  $('btnActivate').disabled = false;
+};
 
 // ---------- diagnostics ----------
 $('btnDiag').onclick = async () => {
   for (const k of [1, 2, 3]) $('step' + k).classList.add('hidden');
+  $('chgSec').classList.add('hidden');
   $('diagSec').classList.remove('hidden');
   try {
     const d = await api('/api/diagnostics');

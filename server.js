@@ -5,7 +5,8 @@ const crypto = require('crypto');
 const dns = require('dns').promises;
 const { exec } = require('child_process');
 
-const { ZClient, loadSnapshot, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX } = require('./src/zscaler');
+const { ZClient, loadSnapshot, refreshKeys, ZIA, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX } = require('./src/zscaler');
+const changes = require('./src/changes');
 const bulk = require('./src/bulk');
 const recommend = require('./src/recommend');
 const { simulate, rationalize } = require('./src/engine');
@@ -261,6 +262,146 @@ app.get('/api/bulk/result', (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="${j.name.replace(/[^\w.-]+/g, '_')}-results${only ? '-' + (req.query.only || 'filtered') : ''}-${stamp}.csv"`);
   res.send('\uFEFF' + bulk.toCsv(j.results, only));
 });
+
+// ---------- policy changes ----------
+// Write mode is off by default and per session. Sample / offline sessions apply changes to the in-memory policy only.
+const apiFor = (s) => (s.demo ? (s.mockApi = s.mockApi || changes.mockApi(s.snap.data)) : changes.realApi(s.client));
+const tenantOf = (s) => (s.demo ? 'sample policy (in memory)' : s.client.tokenHost.split('.')[0]);
+function previewBody(b) {
+  if (Array.isArray(b)) return b.length > 8 ? [...b.slice(0, 8).map(previewBody), `… ${(b.length - 8).toLocaleString()} more`] : b.map(previewBody);
+  if (b && typeof b === 'object') return Object.fromEntries(Object.entries(b).map(([k, v]) => [k, previewBody(v)]));
+  return b;
+}
+function auditWrite(s, entry) {
+  try {
+    const fs = require('fs'), os = require('os');
+    const dir = path.join(os.homedir(), 'ZTP-Policy-Simulator', 'changes');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, `${tenantOf(s).replace(/\W+/g, '_')}.jsonl`), JSON.stringify(Object.assign({ tenant: tenantOf(s) }, entry)) + '\n');
+  } catch (e) { console.error('[audit]', e.message); }
+}
+async function afterChange(s, keys) {
+  if (!s.demo && s.client && keys && keys.length) await refreshKeys(s.client, s.snap, keys);
+}
+
+app.post('/api/changes/mode', (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  if (req.body.enable !== undefined) s.writeEnabled = !!req.body.enable;
+  res.json({ writeEnabled: !!s.writeEnabled, mock: !!s.demo, tenant: s.snap ? tenantOf(s) : null });
+});
+
+app.post('/api/changes/context', (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  if (!s.snap) return res.status(409).json({ error: 'Load policies first.' });
+  const d = s.snap.data, arr = (x) => (Array.isArray(x) ? x : []);
+  const ids = (l) => arr(l).map((c) => String((c && c.id) || c));
+  const rules = (k) => arr(d[k]).filter((r) => !r.defaultRule).sort((a, b) => a.order - b.order)
+    .map((r) => ({ id: r.id, name: r.name, order: r.order, action: r.action, state: r.state, cats: [...ids(r.urlCategories), ...ids(r.destIpCategories), ...ids(r.resCategories)], groups: ids(r.destIpGroups) }));
+  res.json({
+    tenant: tenantOf(s), mock: !!s.demo, writeEnabled: !!s.writeEnabled, errors: s.snap.errors,
+    categories: arr(d.customUrlCategories).map((c) => ({ id: c.id, name: c.configuredName || c.id, count: arr(c.urls).length + arr(c.ipRanges).length })),
+    groups: arr(d.ipDestinationGroups).map((g) => ({ id: g.id, name: g.name, type: g.type || 'DSTN_IP', count: arr(g.addresses).length })),
+    rules: { url: rules('urlFilteringRules'), firewall: rules('firewallRules'), dns: rules('dnsRules') },
+    locations: arr(d.locations).map((l) => ({ id: l.id, name: l.name })),
+    limits: { groupMax: changes.GROUP_MAX, nameMax: changes.NAME_MAX },
+  });
+});
+
+// Directory search for rule criteria (groups, departments, users).
+app.post('/api/directory', wrap(async (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  const type = ['groups', 'departments', 'users'].includes(req.body.type) ? req.body.type : 'groups';
+  const q = String(req.body.q || '').trim();
+  let list = [];
+  if (s.demo || !s.client) {
+    const seen = new Map();
+    for (const k of ['urlFilteringRules', 'firewallRules', 'dnsRules', 'sslRules', 'webDlpRules']) for (const r of (s.snap && s.snap.data[k]) || []) for (const x of r[type] || []) if (x && x.name) seen.set(String(x.id), { id: x.id, name: x.name });
+    list = [...seen.values()];
+  } else {
+    const out = await s.client.get(`${ZIA}/${type}`, Object.assign({ pageSize: '50' }, q ? { search: q } : {}));
+    list = (Array.isArray(out) ? out : []).map((x) => ({ id: x.id, name: x.name || x.email, email: x.email }));
+  }
+  if (q) list = list.filter((x) => (x.name + ' ' + (x.email || '')).toLowerCase().includes(q.toLowerCase()));
+  res.json({ results: list.slice(0, 50) });
+}));
+
+// Resolve a bulk selection (filter and/or ticked rows) into destinations.
+app.post('/api/bulk/select', (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  const j = s.bulk; if (!j) return res.status(404).json({ error: 'No bulk test in this session.' });
+  const f = req.body.filter || {}, ticked = new Set((req.body.rows || []).map(String));
+  const rows = j.results.filter((r) => !r.error && (ticked.size ? ticked.has(String(r.row)) : true)
+    && (!f.results || !f.results.length || f.results.includes(r.result))
+    && (!f.mismatch || r.meets === 'no')
+    && (!f.category || (r.category || '').split('; ').includes(f.category))
+    && (!f.area || r.area === f.area));
+  const blocked = rows.filter((r) => r.action !== 'ALLOW' && r.action !== 'BYPASS');
+  const deciders = {};
+  for (const r of blocked) { const k = `${r.module}|${r.rule}`; deciders[k] = (deciders[k] || 0) + 1; }
+  res.json({ count: rows.length, targets: [...new Set(rows.map((r) => r.target))], blocked: blocked.length, allowed: rows.filter((r) => r.action === 'ALLOW').length,
+    bypassed: rows.filter((r) => r.action === 'BYPASS').length, deciders: Object.entries(deciders).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([k, n]) => ({ module: k.split('|')[0], rule: k.split('|')[1], count: n })) });
+});
+
+app.post('/api/changes/plan', (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  if (!s.snap) return res.status(409).json({ error: 'Load policies first.' });
+  const p = changes.plan(req.body.spec || {}, s.snap.data);
+  s.plans = s.plans || new Map(); s.plans.set(p.id, p);
+  res.json(Object.assign({}, p, { entries: undefined, steps: p.steps.map((st) => ({ title: st.title, method: st.method, path: '/zia/api/v1' + st.path, body: previewBody(st.body) })), tenant: tenantOf(s), mock: !!s.demo, writeEnabled: !!s.writeEnabled }));
+});
+
+app.post('/api/changes/apply', wrap(async (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  const p = s.plans && s.plans.get(req.body.planId);
+  if (!p) return res.status(404).json({ error: 'That preview has expired. Preview the change again.' });
+  if (p.errors.length) return res.status(400).json({ error: p.errors.join(' ') });
+  if (!s.writeEnabled) return res.status(403).json({ error: 'Policy changes are switched off for this session. Turn on "Allow policy changes" first.' });
+  if (req.body.confirm !== true) return res.status(400).json({ error: 'Confirmation required.' });
+  const api = apiFor(s);
+  const entry = await changes.apply(p, api);
+  s.plans.delete(p.id);
+  await afterChange(s, p.refreshKeys);
+  let status = null; try { status = (await api.request('GET', '/status')).status; } catch {}
+  s.changeLog = s.changeLog || []; s.changeLog.unshift(entry);
+  auditWrite(s, { type: 'apply', id: entry.id, at: entry.at, intent: entry.intent, summary: entry.summary, done: entry.done.map((d) => ({ title: d.title, method: d.method, path: d.path })), failed: entry.failed });
+  console.log(`[change] ${tenantOf(s)}: ${entry.done.length}/${p.steps.length} steps${entry.failed ? ' FAILED: ' + entry.failed.error : ''}`);
+  res.json({ entry: logView(entry), activation: status, mock: !!s.demo });
+}));
+
+const logView = (e) => ({ id: e.id, at: e.at, intent: e.intent, summary: e.summary, done: e.done.map((d) => ({ title: d.title, method: d.method, path: d.path })), failed: e.failed, undone: e.undone, undoResults: e.undoResults });
+
+app.post('/api/changes/log', (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  res.json({ entries: (s.changeLog || []).map(logView) });
+});
+
+app.post('/api/changes/undo', wrap(async (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  if (!s.writeEnabled) return res.status(403).json({ error: 'Turn on "Allow policy changes" to undo.' });
+  const e = (s.changeLog || []).find((x) => x.id === req.body.id);
+  if (!e) return res.status(404).json({ error: 'Change not found.' });
+  if (e.undone) return res.status(409).json({ error: 'Already undone.' });
+  const api = apiFor(s);
+  const results = await changes.undo(e, api);
+  await afterChange(s, e.refreshKeys);
+  auditWrite(s, { type: 'undo', id: e.id, at: Date.now(), results });
+  let status = null; try { status = (await api.request('GET', '/status')).status; } catch {}
+  res.json({ entry: logView(e), activation: status });
+}));
+
+app.post('/api/changes/status', wrap(async (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  const out = await apiFor(s).request('GET', '/status');
+  res.json({ status: out && out.status, mock: !!s.demo });
+}));
+
+app.post('/api/changes/activate', wrap(async (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  if (!s.writeEnabled) return res.status(403).json({ error: 'Turn on "Allow policy changes" to activate.' });
+  const out = await apiFor(s).request('POST', '/status/activate');
+  auditWrite(s, { type: 'activate', at: Date.now(), result: out && out.status });
+  res.json({ status: out && out.status, mock: !!s.demo });
+}));
 
 app.listen(PORT, HOST, () => {
   const url = `http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`;

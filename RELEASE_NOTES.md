@@ -1,18 +1,18 @@
-# ZeroTrustPanda ZS Policy Simulator v1.3.0
+# ZeroTrustPanda ZS Policy Simulator v1.4.0
 
-**Would this be allowed, blocked or bypassed — and by what?** A standalone, read-only simulator that pulls your live Zscaler policy over OneAPI and evaluates a transaction across ZIA, ZPA and Client Connector the way the cloud would, in rule order, then shows the deciding rule and everything else that could change the outcome.
+**Would this be allowed, blocked or bypassed — and by what?** A standalone simulator that pulls your live Zscaler policy over OneAPI and evaluates a transaction across ZIA, ZPA and Client Connector the way the cloud would, in rule order, then shows the deciding rule and everything else that could change the outcome.
 
 Companion to the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustPanda/ZTP-Policy-Wizard) — same look, same OneAPI authentication.
 
 ## Downloads
 | Platform | File |
 |---|---|
-| Windows x64 | [ZTP-Policy-Simulator-1.3.0-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.3.0/ZTP-Policy-Simulator-1.3.0-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
-| macOS Apple Silicon | [ZTP-Policy-Simulator-1.3.0-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.3.0/ZTP-Policy-Simulator-1.3.0-macos-arm64.zip) |
-| macOS Intel | [ZTP-Policy-Simulator-1.3.0-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.3.0/ZTP-Policy-Simulator-1.3.0-macos-x64.zip) |
+| Windows x64 | [ZTP-Policy-Simulator-1.4.0-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.4.0/ZTP-Policy-Simulator-1.4.0-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
+| macOS Apple Silicon | [ZTP-Policy-Simulator-1.4.0-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.4.0/ZTP-Policy-Simulator-1.4.0-macos-arm64.zip) |
+| macOS Intel | [ZTP-Policy-Simulator-1.4.0-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.4.0/ZTP-Policy-Simulator-1.4.0-macos-x64.zip) |
 | Source | clone the repo, or GitHub's "Source code" download on the release |
 
-Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.3.0/SHA256SUMS.txt)
+Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.4.0/SHA256SUMS.txt)
 
 No install, no Node.js required. Run it and it opens `http://127.0.0.1:8787`.
 macOS builds are unsigned — before first run: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`.
@@ -53,6 +53,24 @@ Single simulations of a single IP or host now also show its Zscaler category (`c
 ### Category lookup (single page)
 **🏷 Look up category** next to Simulate looks up the Destination with Zscaler (up to 100 entries, separated by commas or spaces). It shows each category, tagged *threat*, *low collateral* or *broad*, plus any cloud app Zscaler maps it to, and lists every loaded rule that uses that category (URL Filtering, Firewall, DNS, SSL Inspection, ATP setting) with its order and action. It needs a live tenant connection.
 
+### Policy changes (new in 1.4.0): block it / allow it
+The simulator can now fix what it finds. It is **read-only until you switch on "Allow policy changes"** for the session, and every change is previewed call by call before anything is sent.
+
+- **Single result:** under the result tiles, *Change this result* offers **✅ Allow it…** for a blocked, cautioned or isolated destination, and **⛔ Block it…** for an allowed one. For a Client Connector bypass it explains that ZIA rules apply only once the bypass is removed.
+- **Bulk run:** tick rows in the results, or use the filter (result, "not as expected", category) to select across the whole run, then **⛔ Block selected…** or **✅ Allow selected…**.
+- **The wizard** asks, in order:
+  1. **Destinations:** editable, with optional CIDR collapsing.
+  2. **Where to apply:** 🌐 URL Filtering (web), 🧱 Firewall Filtering (all ports), 🔤 DNS Control, or 🛡 ATP (denylist to block, Security Exceptions allowlist to allow). It preselects the area that decided the traffic.
+  3. **Custom URL category:** create one or add to an existing one. URL Filtering uses it, and DNS Control uses it as both the requested-domain and resolved-IP category.
+  4. **Destination group:** create one or add to an existing one, for Firewall Filtering. Groups fill to 8,000 entries and extra groups are created automatically. Hostnames go in a separate FQDN group.
+  5. **Rule per area:** create a new rule with a name (31 characters max), a position you choose from the current rule list (the rule that currently decides is marked) and, for firewall blocks, Drop or Reset. Or reuse an existing rule that already uses the chosen category or group, so only the entries are added.
+  6. **Who:** everyone, or specific groups, departments, users and locations, searched live from ZIA.
+- **Preview** lists every API call with its body, plus warnings: limits, names, and an earlier catch-all rule with the opposite action that would stop the new rule ever applying.
+- **Save** runs the calls in order and stops at the first error. Changes are saved but not live: a *Changes pending activation* badge appears, and **Activate** is in the dialog and under **🧾 Policy changes**.
+- **Undo:** every change can be undone from 🧾 Policy changes (deletes what was created, restores what was edited). Each change is also written to `~/ZTP-Policy-Simulator/changes/<tenant>.jsonl`, with no credentials.
+- **Sample and offline sessions** apply changes to the in-memory policy only, so you can rehearse a change and re-simulate before touching a tenant.
+- **API client:** needs ZIA read/write scope in ZIdentity for changes. Payloads follow the ZeroTrustPanda Policy Wizard's verified templates. DNS rule category fields and creating a category with only CIDR ranges follow the API reference but haven't been tested on a live tenant yet, so try a single test IP first.
+
 ### Smart defaults (always stated, always overridable)
 Port from the URL scheme (hostnames assume HTTPS/443) · network service and application from protocol+port (UDP/443 → QUIC) · request method GET, or CONNECT when not decrypted · file type from the URL path · standard DNS resolver for DNS app rules · default rules (order −1) evaluated last.
 
@@ -65,6 +83,13 @@ Port from the URL scheme (hostnames assume HTTPS/443) · network service and app
 - Zscaler offers no "evaluate this transaction" API, so evaluation is re-implemented from rule data. Time windows, user agent, device trust, risk score and source-port bypasses are flagged as unknown rather than evaluated.
 - No per-transaction log lookup: the console's transaction-log endpoints refuse API-client tokens. Use the console's Web / Firewall Insights logs for per-transaction proof.
 - ZCC field names follow the shapes verified by the Policy Wizard; report any app profile that shows "no forwarding profile linked".
+
+## Changes in 1.4.0
+- **Block it / Allow it** on any single result, and **Block / Allow selected** for bulk rows (ticked rows or a filter across the whole run).
+- Change wizard for URL Filtering, Firewall Filtering, DNS Control and the ATP denylist/allowlist: new or existing custom URL category and destination group (auto-split at 8,000), new rule at a position you choose or reuse an existing rule, user/group/department/location criteria.
+- Preview of every API call, warnings for limits and shadowing catch-all rules, save with stop-on-error, undo, activation status and Activate, audit log file.
+- Write mode is off by default per session; sample and offline sessions apply to the in-memory policy.
+- Simulator now matches IPs listed as custom-category URLs and IPs on ATP allow/deny lists.
 
 ## Changes in 1.3.0
 - **🏷 Look up category** button on the single-transaction page: Zscaler category, threat / low-collateral / broad tag, cloud app, and the policy rules that use each category.

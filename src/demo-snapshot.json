@@ -113,10 +113,11 @@
   {
    "id": 24,
    "name": "Default Allow",
-   "order": 4,
+   "order": -1,
    "rank": 7,
    "state": "ENABLED",
-   "action": "ALLOW"
+   "action": "ALLOW",
+   "defaultRule": true
   }
  ],
  "dnsRules": [
@@ -249,12 +250,12 @@
   ]
  },
  "atpMaliciousUrls": {
-  "maliciousUrls": [
+  "blacklistUrls": [
    ".evil-denylist.example"
   ]
  },
  "atpSecurityExceptions": {
-  "bypassUrls": [
+  "whitelistUrls": [
    "trusted.partner.example"
   ]
  },

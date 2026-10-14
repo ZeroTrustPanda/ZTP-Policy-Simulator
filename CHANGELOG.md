@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.0 — 2026-10-14
+- Policy changes: Block it / Allow it (single) and Block / Allow selected (bulk); wizard for URL Filtering, Firewall Filtering, DNS Control and ATP lists; create or reuse custom URL categories, destination groups (auto-split at 8,000) and rules; placement chosen from the live rule list; user/group/department/location criteria.
+- Preview of every call, shadowing and limit warnings, stop-on-error apply, undo, activation, per-tenant audit log; write mode opt-in per session; in-memory ZIA for sample/offline sessions.
+- Engine: IPs in custom-category URL lists and ATP lists now match IP destinations.
+- Sample policy: ATP lists use the real API field names; firewall default rule flagged as default.
+
 ## 1.3.0 — 2026-10-14
 - Single page: 🏷 Look up category (up to 100 entries) with category risk tag, cloud app and the rules referencing each category.
 - Bulk: expected result (run-wide or `expected` column); per-row meets / recommended area / recommendation; Recommendations card by area and by category; per-area destination list download; "Not as expected only" CSV.
