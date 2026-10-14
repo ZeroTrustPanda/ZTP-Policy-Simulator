@@ -1,0 +1,10 @@
+services:
+  ztp-policy-simulator:
+    build:
+      context: .
+    image: ztp-policy-simulator
+    ports:
+      - "${PORT:-8787}:8787"
+    volumes:
+      - ${ZSCALER_CERT_PATH:-./docker/empty-ca.crt}:/usr/local/share/ca-certificates/zscaler-runtime-ca.crt:ro
+    restart: unless-stopped

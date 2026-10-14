@@ -1,0 +1,9 @@
+.git
+node_modules
+dist
+downloads
+test
+snapshots
+*.log
+.DS_Store
+.claude

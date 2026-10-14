@@ -3,3 +3,5 @@ dist/
 *.log
 .DS_Store
 snapshots/
+.env
+docker/zscaler-ca.macos.crt
