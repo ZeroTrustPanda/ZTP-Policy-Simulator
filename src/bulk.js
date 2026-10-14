@@ -173,11 +173,25 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const tick = () => new Promise((r) => setImmediate(r));
 
 // Batched category lookup. Fills cache (Map key -> {categories, security, error}). Waits out 429s.
-async function lookupAll(job, client, keys, cache, urlLookup, batchSize) {
-  const todo = [...new Set(keys)].filter((k) => k && !cache.has(k));
-  job.lookup = { total: todo.length, done: 0, failed: 0, calls: 0, waitingUntil: null, stopped: null };
+// Retry schedule (seconds). Transient = Zscaler "please retry" (412), 5xx, timeouts, network errors.
+// Refused = 401/403 after earlier calls succeeded — almost always a lookup quota, so pause and retry, don't stop.
+const DEFAULT_TIMING = { transient: [5, 15, 30, 60, 120], refused: [60, 120, 300, 600, 900, 900, 900, 900, 900, 900], paceAfterTrouble: 2000 };
+const shortMsg = (e) => String(e && e.message || e).replace(/^HTTP \d+ POST \S+: /, '').slice(0, 180);
+
+async function waitFor(job, secs, reason) {
+  job.lookup.waitingUntil = Date.now() + secs * 1000; job.lookup.waitReason = reason;
+  while (Date.now() < job.lookup.waitingUntil && !job.cancelled) { await sleep(Math.max(5, Math.min(500, job.lookup.waitingUntil - Date.now()))); job.touch(); }
+  job.lookup.waitingUntil = null; job.lookup.waitReason = null;
+}
+
+// Batched category lookup. Fills cache (Map key -> {categories, security, error?}). Entries cached with an error are retried.
+async function lookupAll(job, client, keys, cache, urlLookup, batchSize, timing = DEFAULT_TIMING) {
+  const todo = [...new Set(keys)].filter((k) => k && !(cache.has(k) && !cache.get(k).error));
+  job.lookup = { total: todo.length, done: 0, failed: 0, calls: 0, okCalls: 0, retries: 0, waitingUntil: null, waitReason: null, stopped: null, stoppedKind: null, lastError: null };
+  let transientTries = 0, refusedTries = 0, pace = 0;
   for (let i = 0; i < todo.length && !job.cancelled;) {
     const batch = todo.slice(i, i + batchSize);
+    if (pace) await sleep(pace);
     try {
       job.lookup.calls++;
       const out = await urlLookup(client, batch, { rateRetries: 0 });
@@ -186,17 +200,34 @@ async function lookupAll(job, client, keys, cache, urlLookup, batchSize) {
         const o = byKey.get(k.toLowerCase());
         cache.set(k, o ? { categories: o.urlClassifications || [], security: o.urlClassificationsWithSecurityAlert || [] } : { categories: [], security: [], error: 'not returned by lookup' });
       }
-      job.lookup.done += batch.length; i += batch.length; job.lookup.waitingUntil = null;
+      job.lookup.done += batch.length; job.lookup.okCalls++; i += batch.length; transientTries = 0; refusedTries = 0;
     } catch (e) {
-      if (e.status === 429) {
-        const secs = Math.min(Math.max(e.retryAfter || 60, 1), 3600);
-        job.lookup.waitingUntil = Date.now() + secs * 1000;
-        while (Date.now() < job.lookup.waitingUntil && !job.cancelled) { await sleep(500); job.touch(); }
+      const st = e.status;
+      job.lookup.lastError = `${st || 'network error'}: ${shortMsg(e)}`;
+      if (st === 429) {
+        await waitFor(job, Math.min(Math.max(e.retryAfter || 60, 1), 3600), "Zscaler's lookup rate limit (429)");
+        pace = timing.paceAfterTrouble; continue;
+      }
+      if (st === 401 || st === 403) {
+        if (!job.lookup.okCalls) { job.lookup.stopped = `Category lookup not permitted for this API client (${st}: ${shortMsg(e)}). Results use policy only.`; job.lookup.stoppedKind = 'denied'; break; }
+        if (refusedTries >= timing.refused.length) {
+          job.lookup.stopped = `Zscaler kept refusing lookups (${st}) after ${job.lookup.okCalls} successful calls, probably a lookup quota. ${(todo.length - i).toLocaleString()} addresses were not looked up; rerun them later.`;
+          job.lookup.stoppedKind = 'quota'; break;
+        }
+        if (st === 401 && client && client.auth) { try { await client.auth(true); } catch {} }
+        job.lookup.retries++;
+        await waitFor(job, timing.refused[refusedTries++], `Zscaler refused the lookup (${st}) after ${job.lookup.okCalls} successful calls, probably a quota. Retry ${refusedTries} of ${timing.refused.length}`);
+        pace = timing.paceAfterTrouble; continue;
+      }
+      if (batch.length > 1 && st === 400) { batchSize = Math.max(1, Math.floor(batch.length / 4)); continue; } // isolate a bad entry
+      const transient = !st || st === 408 || st === 412 || st >= 500;
+      if (transient && transientTries < timing.transient.length) {
+        job.lookup.retries++;
+        await waitFor(job, timing.transient[transientTries++], `Zscaler asked to retry (${st || 'network error'}). Retry ${transientTries} of ${timing.transient.length}`);
         continue;
       }
-      if (e.status === 401 || e.status === 403) { job.lookup.stopped = `Category lookup not permitted for this API client (${e.status}). Results use policy only.`; break; }
-      if (batch.length > 1 && e.status === 400) { batchSize = Math.max(1, Math.floor(batch.length / 4)); continue; } // isolate a bad entry
-      for (const k of batch) cache.set(k, { categories: [], security: [], error: e.message.slice(0, 160) });
+      transientTries = 0;
+      for (const k of batch) cache.set(k, { categories: [], security: [], error: shortMsg(e) });
       job.lookup.done += batch.length; job.lookup.failed += batch.length; i += batch.length;
     }
     job.touch();
@@ -209,7 +240,7 @@ async function runJob(session, job, rows, opts, deps) {
     const cache = session.catCache || (session.catCache = new Map());
     if (opts.lookup && session.client) {
       job.phase = 'lookup';
-      await lookupAll(job, session.client, rows.filter((r) => !r.categories).map((r) => lookupKey(r.target)), cache, deps.urlLookup, deps.URL_LOOKUP_MAX || 100);
+      await lookupAll(job, session.client, rows.filter((r) => !r.categories).map((r) => lookupKey(r.target)), cache, deps.urlLookup, deps.URL_LOOKUP_MAX || 100, deps.timing);
     }
     job.phase = 'simulate';
     for (let i = 0; i < rows.length && !job.cancelled; i++) {
@@ -218,7 +249,7 @@ async function runJob(session, job, rows, opts, deps) {
       let cat;
       if (row.categories) cat = { categories: row.categories.split(/[|; ]+/).map((c) => c.trim().toUpperCase()).filter(Boolean), security: [], source: 'file' };
       else if (key && cache.has(key)) { const c = cache.get(key); cat = { categories: c.categories, security: c.security, source: c.error ? `lookup failed: ${c.error}` : 'Zscaler lookup' }; }
-      else cat = { categories: [], security: [], source: opts.lookup && session.client ? (job.lookup && job.lookup.stopped ? 'lookup not permitted' : 'not looked up') : 'lookup off' };
+      else cat = { categories: [], security: [], source: !(opts.lookup && session.client) ? 'lookup off' : job.lookup && job.lookup.stoppedKind === 'denied' ? 'lookup not permitted' : job.lookup && job.lookup.stoppedKind === 'quota' ? 'lookup stopped (Zscaler quota): rerun later' : 'not looked up' };
       try {
         const body = {
           target: row.target, protocol: (row.protocol || opts.defaultProtocol || 'tcp').toLowerCase(),

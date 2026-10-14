@@ -66,3 +66,49 @@ test('job runs against sample policies with batched lookup and a 429 wait', asyn
   assert.equal(st.summary.lookedUp, 10);
   assert.ok(st.summary.counts.BLOCKED >= 1);
 });
+
+// Replays the SOC-list run: OK calls, a 412 "please retry", then 403s after success (quota), then recovery.
+const FAST = { transient: [0.01, 0.01], refused: [0.01, 0.01, 0.01], paceAfterTrouble: 1 };
+const ctxFor = async (s, b) => ({ target: M.parseTarget(b.target), port: b.port ? +b.port : null, protocol: b.protocol, categories: b.categories || [], resolvedIps: [], groups: [], notes: [] });
+function runWith(script, csv, timing = FAST, session) {
+  let n = 0;
+  const lookup = async (c, urls) => {
+    const step = script[n++] || 'ok';
+    if (step !== 'ok') throw Object.assign(new Error(`HTTP ${step} POST /zia/api/v1/urlLookup: {"code":"X"}`), { status: step });
+    return urls.map((u) => ({ url: u, urlClassifications: ['MISCELLANEOUS_OR_UNKNOWN'] }));
+  };
+  session = session || { snap: { data: require('../src/demo-snapshot.json') }, client: {}, last: 0 };
+  const rows = bulk.expand(bulk.parseCsv(csv).entries).rows;
+  const job = { id: 'x', total: rows.length, done: 0, results: [], touch() {} };
+  return bulk.runJob(session, job, rows, { lookup: true }, { buildContext: ctxFor, simulate, urlLookup: lookup, URL_LOOKUP_MAX: 2, timing }).then(() => ({ job, session, calls: () => n }));
+}
+
+test('412 and quota 403s after success are retried, not treated as "not permitted"', async () => {
+  const { job } = await runWith(['ok', 412, 'ok', 403, 403, 'ok'], 'ip\n45.0.0.0/29\n');
+  assert.equal(job.lookup.stopped, null);
+  assert.equal(job.lookup.failed, 0);
+  assert.equal(job.lookup.retries, 3);
+  assert.ok(job.results.every((r) => r.categorySource === 'Zscaler lookup'), 'every row categorised');
+});
+
+test('403 on the very first call means not permitted', async () => {
+  const { job } = await runWith([403], 'ip\n45.0.0.1\n');
+  assert.equal(job.lookup.stoppedKind, 'denied');
+  assert.equal(job.results[0].categorySource, 'lookup not permitted');
+});
+
+test('quota that never clears stops with a rerun-later label', async () => {
+  const { job } = await runWith(['ok', 403, 403, 403, 403], 'ip\n45.0.0.0/30\n');
+  assert.equal(job.lookup.stoppedKind, 'quota');
+  const src = job.results.map((r) => r.categorySource);
+  assert.equal(src.filter((x) => x === 'Zscaler lookup').length, 2);
+  assert.ok(src.filter((x) => /quota/.test(x)).length === 2);
+});
+
+test('failed lookups are retried on the next run in the same session', async () => {
+  const first = await runWith([500, 500, 500], 'ip\n45.0.0.9\n', { transient: [0.01, 0.01], refused: [], paceAfterTrouble: 1 });
+  assert.equal(first.job.lookup.failed, 1);
+  const second = await runWith([], 'ip\n45.0.0.9\n', FAST, first.session);
+  assert.equal(second.calls(), 1);
+  assert.equal(second.job.results[0].categorySource, 'Zscaler lookup');
+});

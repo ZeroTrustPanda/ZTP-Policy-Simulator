@@ -139,7 +139,7 @@ async function buildContext(s, b) {
     if (key) {
       s.catCache = s.catCache || new Map();
       try {
-        if (!s.catCache.has(key)) {
+        if (!s.catCache.has(key) || s.catCache.get(key).error) {
           const out = await urlLookup(s.client, [key]);
           const o = out.find((x) => String(x.url || '').toLowerCase() === key.toLowerCase()) || out[0];
           s.catCache.set(key, o ? { categories: o.urlClassifications || [], security: o.urlClassificationsWithSecurityAlert || [] } : { categories: [], security: [], error: 'not returned' });

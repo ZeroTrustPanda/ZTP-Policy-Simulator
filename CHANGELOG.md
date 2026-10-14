@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.1 — 2026-10-14
+- Bulk category lookup: retry 412 / 5xx / network errors with backoff; treat 401/403 after successful calls as a quota (pause and retry, up to ~2 h) instead of stopping; only a first-call refusal means not permitted.
+- Failed lookups are not cached as final, so a rerun retries them.
+- Progress shows the pause reason, retry count and last Zscaler error.
+
 ## 1.2.0 — 2026-10-14
 - Bulk test (CSV) mode in the Simulate step: CSV/paste input with header aliases, CIDR/range expansion (/16 per row, 250,000 rows max), batched ZIA `urlLookup` (100 per call) with rate-limit waits, progress, cancel, summary and preview, and results CSV (all or flagged only, formula-safe).
 - Zscaler category lookup for single IPs in one-off simulations (cached per session); user lookups cached.

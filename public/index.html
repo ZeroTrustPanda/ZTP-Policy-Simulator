@@ -648,7 +648,7 @@ function renderBulk(j) {
   if (j.phase === 'lookup' && L) {
     const wait = L.waitingUntil ? (L.waitingUntil - Date.now()) / 1000 : 0;
     pct = L.total ? (L.done / L.total) * 100 : 0;
-    phase = wait > 0 ? `Paused by Zscaler's lookup rate limit · resuming in ${fmtSecs(wait)} · ${num(L.done)} of ${num(L.total)} categories looked up`
+    phase = wait > 0 ? `Paused · ${esc(L.waitReason || "Zscaler's lookup rate limit")} · resuming in ${fmtSecs(wait)} · ${num(L.done)} of ${num(L.total)} looked up`
       : `Looking up Zscaler categories · ${num(L.done)} of ${num(L.total)}`;
   } else if (running) { pct = j.total ? (j.done / j.total) * 100 : 0; phase = `Simulating against the loaded policy · ${num(j.done)} of ${num(j.total)}`; }
   else if (j.phase === 'done') { pct = 100; phase = `Finished · ${num(j.total)} rows in ${fmtSecs((j.finished - j.started) / 1000)}`; }
@@ -658,6 +658,7 @@ function renderBulk(j) {
   if (p.skipped) notes.push(`${num(p.skipped)} line(s) skipped. ${(p.skippedSample || []).slice(0, 4).map((x) => `Line ${x.line} (${esc(x.text)}): ${esc(x.why)}.`).join(' ')}${p.skipped > 4 ? ' …' : ''}`);
   if (!p.lookup) notes.push(`Category lookup off (${esc(p.lookupOffReason || '')}). Rules that depend on a category show as not matched unless your file has a category column.`);
   if (L && L.stopped) notes.push(esc(L.stopped));
+  if (L && L.retries) notes.push(`${num(L.retries)} lookup ${L.retries === 1 ? 'retry' : 'retries'} so far. Last Zscaler error: ${esc(L.lastError || '')}`);
   if (L && L.failed) notes.push(`${num(L.failed)} lookups failed. The Category source column says why for each row.`);
   const stat = (cls, n, label) => `<div class="stat ${cls}"><div class="n">${num(n)}</div><div class="l">${label}</div></div>`;
   const stats = Object.keys(RES).filter((k) => s.counts[k] || k === 'BLOCKED' || k === 'ALLOWED').map((k) => stat(k, s.counts[k], `${RES[k][0]} ${RES[k][1]}`)).join('')
