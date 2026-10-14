@@ -112,3 +112,47 @@ test('failed lookups are retried on the next run in the same session', async () 
   assert.equal(second.calls(), 1);
   assert.equal(second.job.results[0].categorySource, 'Zscaler lookup');
 });
+
+test('recommendations: expected block / allow → best policy area', async () => {
+  const csv = [
+    'ip,category,expected',
+    '45.2.0.1,ANONYMIZER,block',            // ATP setting off in sample -> ATP
+    '45.2.0.2,PROFESSIONAL_SERVICES,block', // broad category on an IP -> Firewall IP group
+    '45.2.0.3,,block',                      // no category -> Firewall
+    'bad.example.net,PROFESSIONAL_SERVICES,block', // host -> URL Filtering custom category
+    '10.20.30.40,,block',                   // ZCC bypass -> Client Connector
+    '203.0.113.10,,block',                  // already blocked
+    '45.2.0.4,GAMBLING,allow',              // blocked by URL category rule -> custom allow category
+    '45.2.0.5,MALWARE_SITE,allow',          // blocked by ATP -> allowlist
+    '45.2.0.6,WEB_SEARCH,allow',            // fine
+  ].join('\n');
+  const { job } = await runWith([], csv);
+  const by = Object.fromEntries(job.results.map((r) => [r.target, r]));
+  assert.equal(by['45.2.0.1'].area, 'ATP'); assert.match(by['45.2.0.1'].recommendation, /Anonymizers/);
+  assert.equal(by['45.2.0.2'].area, 'Firewall'); assert.match(by['45.2.0.2'].recommendation, /Don't block category PROFESSIONAL_SERVICES/);
+  assert.equal(by['45.2.0.3'].category, 'MISCELLANEOUS_OR_UNKNOWN'); // from the fake lookup
+  assert.equal(by['45.2.0.3'].area, 'URL Filtering'); assert.match(by['45.2.0.3'].recommendation, /Block category MISCELLANEOUS_OR_UNKNOWN/);
+  assert.equal(by['bad.example.net'].area, 'URL Filtering'); assert.match(by['bad.example.net'].recommendation, /custom URL category/);
+  assert.equal(by['10.20.30.40'].area, 'Client Connector');
+  assert.equal(by['203.0.113.10'].meets, 'yes');
+  assert.equal(by['45.2.0.4'].meets, 'no'); assert.match(by['45.2.0.4'].recommendation, /Allow rule above/);
+  assert.equal(by['45.2.0.5'].area, 'ATP'); assert.match(by['45.2.0.5'].recommendation, /allowlist/);
+  assert.equal(by['45.2.0.6'].meets, 'yes');
+  const rec = bulk.status(job).summary.recommendations;
+  assert.equal(rec.expectedRows, 9); assert.equal(rec.misses, 7);
+  assert.ok(rec.byArea.find((a) => a.area === 'Firewall' && a.count === 1));
+  assert.ok(rec.categories.find((c) => c.category === 'PROFESSIONAL_SERVICES' && /Do not block/.test(c.advice)));
+});
+
+test('run-wide expectation applies when the file has no expected column', async () => {
+  const session = { snap: { data: require('../src/demo-snapshot.json') }, client: {}, last: 0 };
+  const rows = bulk.expand(bulk.parseCsv('45.3.0.1\n203.0.113.10\n').entries).rows;
+  const job = { id: 'e', total: rows.length, done: 0, results: [], touch() {} };
+  await bulk.runJob(session, job, rows, { lookup: false, expected: 'BLOCK' }, { buildContext: ctxFor, simulate });
+  assert.deepEqual(job.results.map((r) => r.meets), ['no', 'yes']);
+});
+
+test('lookup result keeps the cloud application when Zscaler returns one', () => {
+  assert.equal(bulk.fromLookup({ url: 'x', urlClassifications: ['A'], application: 'DROPBOX' }).application, 'DROPBOX');
+  assert.equal(bulk.fromLookup({ url: 'x', urlClassifications: ['A'], application: 'NONE' }).application, '');
+});

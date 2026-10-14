@@ -837,4 +837,4 @@ function summarize(modules, ctx = {}) {
   return { overall, headline, primary, alsoBasedOn: conds, decider, allowedBy, bypasses, inspections, lines };
 }
 
-module.exports = { simulate, rationalize, WELL_KNOWN, fileTypeMatch, FILETYPE_ALIASES, mUrlFiltering, mFirewall, mDns, mSandbox, mFileType, mDlp, mSsl, mAtp, mZpa, mForwarding, sortRules };
+module.exports = { simulate, rationalize, ATP_CATEGORY_MAP, WELL_KNOWN, fileTypeMatch, FILETYPE_ALIASES, mUrlFiltering, mFirewall, mDns, mSandbox, mFileType, mDlp, mSsl, mAtp, mZpa, mForwarding, sortRules };

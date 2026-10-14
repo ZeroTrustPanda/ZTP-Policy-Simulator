@@ -7,6 +7,7 @@ const { exec } = require('child_process');
 
 const { ZClient, loadSnapshot, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX } = require('./src/zscaler');
 const bulk = require('./src/bulk');
+const recommend = require('./src/recommend');
 const { simulate, rationalize } = require('./src/engine');
 const M = require('./src/matchers');
 const VERSION = require('./package.json').version;
@@ -142,7 +143,7 @@ async function buildContext(s, b) {
         if (!s.catCache.has(key) || s.catCache.get(key).error) {
           const out = await urlLookup(s.client, [key]);
           const o = out.find((x) => String(x.url || '').toLowerCase() === key.toLowerCase()) || out[0];
-          s.catCache.set(key, o ? { categories: o.urlClassifications || [], security: o.urlClassificationsWithSecurityAlert || [] } : { categories: [], security: [], error: 'not returned' });
+          s.catCache.set(key, o ? bulk.fromLookup(o) : { categories: [], security: [], error: 'not returned' });
         }
         const c = s.catCache.get(key);
         ctx.categories = [...c.categories, ...c.security];
@@ -188,17 +189,47 @@ app.post('/api/bulk/start', wrap(async (req, res) => {
   const ex = bulk.expand(parsed.entries);
   if (ex.error) return res.status(400).json({ error: ex.error });
   if (!ex.rows.length) return res.status(400).json({ error: 'Nothing valid to test.', skipped: [...parsed.skipped, ...ex.skipped].slice(0, 20) });
-  const opts = { lookup: b.lookup !== false && !!s.client, defaultPort: b.defaultPort || '', defaultProtocol: b.defaultProtocol || 'tcp' };
+  const opts = { lookup: b.lookup !== false && !!s.client, defaultPort: b.defaultPort || '', defaultProtocol: b.defaultProtocol || 'tcp', expected: recommend.normExpected(b.expected) };
   const skipped = [...parsed.skipped, ...ex.skipped];
   const job = {
     id: crypto.randomBytes(6).toString('hex'), phase: 'queued', total: ex.rows.length, done: 0, results: [], started: Date.now(), name: String(b.fileName || 'bulk').replace(/\.[^.]+$/, ''),
     parse: { entries: parsed.entries.length, rows: ex.rows.length, header: parsed.header, skipped: skipped.length, skippedSample: skipped.slice(0, 20), lookup: opts.lookup, lookupOffReason: opts.lookup ? null : s.client ? 'turned off' : 'not connected to a tenant (sample or offline snapshot)' },
-    touch: () => { s.last = Date.now(); },
+    touch: () => { s.last = Date.now(); }, expectation: opts.expected,
   };
   s.bulk = job;
   bulk.runJob(s, job, ex.rows, opts, { buildContext, simulate, urlLookup, URL_LOOKUP_MAX });
   console.log(`[bulk] ${job.total} rows (lookup ${opts.lookup ? 'on' : 'off'})`);
   res.json(bulk.status(job));
+}));
+
+// Category lookup for up to 100 destinations, plus the policy rules that reference each category.
+app.post('/api/lookup', wrap(async (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  const raw = Array.isArray(req.body.entries) ? req.body.entries : String(req.body.entries || '').split(/[\s,;]+/);
+  const entries = [...new Set(raw.map((x) => String(x).trim()).filter(Boolean))];
+  if (!entries.length) return res.status(400).json({ error: 'Enter a URL, host or IP to look up.' });
+  if (entries.length > URL_LOOKUP_MAX) return res.status(400).json({ error: `Up to ${URL_LOOKUP_MAX} entries at a time. Use Bulk test for more.` });
+  if (!s.client) return res.status(409).json({ error: 'Category lookup needs a live tenant connection (not sample policies or an offline snapshot).' });
+  s.catCache = s.catCache || new Map();
+  const keys = entries.map((e) => ({ entry: e, key: bulk.lookupKey(e) }));
+  const need = [...new Set(keys.map((k) => k.key).filter((k) => k && !(s.catCache.has(k) && !s.catCache.get(k).error)))];
+  if (need.length) {
+    const out = await urlLookup(s.client, need);
+    const by = new Map(out.map((o) => [String(o.url || '').toLowerCase(), o]));
+    for (const k of need) { const o = by.get(k.toLowerCase()); s.catCache.set(k, o ? bulk.fromLookup(o) : { categories: [], security: [], error: 'not returned by lookup' }); }
+  }
+  const data = (s.snap && s.snap.data) || {};
+  res.json({
+    results: keys.map(({ entry, key }) => {
+      if (!key) return { entry, error: 'CIDRs and ranges have no single category. Enter individual IPs.' };
+      const c = s.catCache.get(key) || {};
+      const cats = [...(c.categories || []), ...(c.security || [])];
+      return { entry, key, categories: c.categories || [], security: c.security || [], application: c.application || '', error: c.error || null,
+        kinds: Object.fromEntries(cats.map((x) => [x, recommend.categoryKind(x)])),
+        rules: Object.fromEntries(cats.map((x) => [x, recommend.rulesForCategory(data, x)])) };
+    }),
+    policyLoaded: !!s.snap,
+  });
 }));
 
 app.post('/api/bulk/status', (req, res) => {
@@ -216,10 +247,18 @@ app.get('/api/bulk/result', (req, res) => {
   const s = getSession(req, res); if (!s) return;
   const j = s.bulk;
   if (!j) return res.status(404).json({ error: 'No bulk test in this session.' });
-  const only = req.query.only === 'flagged' ? (r) => r.error || r.action !== 'ALLOW' || r.couldBlock : null;
+  const filters = { flagged: (r) => r.error || r.action !== 'ALLOW' || r.couldBlock, mismatch: (r) => r.meets === 'no' };
+  const only = filters[req.query.list || req.query.only] || null;
+  if (req.query.list) {
+    // Plain list of destinations (one per line), ready to paste into an IP destination group or custom URL category.
+    const rows = j.results.filter(only || (() => true)).filter((r) => !req.query.area || r.area === req.query.area);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${j.name.replace(/[^\w.-]+/g, '_')}-${req.query.area ? req.query.area.replace(/\W+/g, '-').toLowerCase() + '-' : ''}destinations.txt"`);
+    return res.send([...new Set(rows.map((r) => r.target))].join('\r\n') + '\r\n');
+  }
   const stamp = new Date(j.started).toISOString().slice(0, 16).replace(/[:T]/g, '-');
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="${j.name.replace(/[^\w.-]+/g, '_')}-results${only ? '-flagged' : ''}-${stamp}.csv"`);
+  res.setHeader('Content-Disposition', `attachment; filename="${j.name.replace(/[^\w.-]+/g, '_')}-results${only ? '-' + (req.query.only || 'filtered') : ''}-${stamp}.csv"`);
   res.send('\uFEFF' + bulk.toCsv(j.results, only));
 });
 

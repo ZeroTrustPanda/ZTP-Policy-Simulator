@@ -171,6 +171,12 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 12
 .two { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 1.25rem; }
 .tablewrap { overflow-x: auto; }
 @media (max-width: 1000px) { .two { grid-template-columns: 1fr; } }
+.area-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; background: rgba(6,182,212,.15); color: #67e8f9; white-space: nowrap; }
+.kind-security { background: var(--accent-red-dim); color: #fca5a5; } .kind-risky { background: var(--accent-amber-dim); color: #fcd34d; } .kind-broad { background: #273349; color: var(--text-secondary); }
+.meets { font-size: 28px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.lk { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 10px; background: var(--bg-input); }
+.lk .hd { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 14px; }
+.lk table { margin-top: 8px; }
 .hidden { display: none !important; }
 @media (max-width: 900px) { .sidebar { display: none; } .content { padding: 1rem; } .span2 { grid-column: auto; } .crit { grid-template-columns: 1fr; } .header { padding: 0 1rem; } }
 </style>
@@ -296,8 +302,9 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 12
               <div><label class="form-label">VPN gateway bypass</label><textarea id="vpnGateways"></textarea></div>
             </div>
           </div>
-          <div class="btn-group"><button class="btn btn-primary" id="btnSim">Simulate</button><span class="msg" id="simMsg"></span></div>
+          <div class="btn-group"><button class="btn btn-primary" id="btnSim">Simulate</button><button class="btn btn-ghost" id="btnLookup" title="Zscaler URL category lookup for the destination (up to 100, separated by commas or spaces)">🏷 Look up category</button><span class="msg" id="simMsg"></span></div>
         </div>
+        <div id="lookupOut"></div>
         <div id="simOut"></div>
         </div>
         <div id="bulkPanel" class="hidden">
@@ -306,13 +313,14 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 12
             <div class="drop" id="bulkDrop">
               <input type="file" id="bulkFile" accept=".csv,.txt,.tsv,text/csv,text/plain" class="hidden">
               <div class="drop-main">📄 Drop a CSV here or <button class="linkbtn" id="bulkPick">choose a file</button></div>
-              <div class="form-hint">One destination per line, or a header row with an <span class="mono">ip</span> column. Optional columns: <span class="mono">port, protocol, sourceIp, location, destCountry, category, user, label</span>. CIDRs and ranges expand to one row per address (up to a /16 per row, 250,000 rows in all). <button class="linkbtn" id="bulkTemplate">Download a template</button></div>
+              <div class="form-hint">One destination per line, or a header row with an <span class="mono">ip</span> column. Optional columns: <span class="mono">port, protocol, sourceIp, location, destCountry, category, user, label, expected</span> (block / allow per row). CIDRs and ranges expand to one row per address (up to a /16 per row, 250,000 rows in all). <button class="linkbtn" id="bulkTemplate">Download a template</button></div>
               <div class="fname hidden" id="bulkFileName"></div>
             </div>
             <details style="margin-top:10px"><summary>Or paste a list</summary><textarea id="bulkPaste" style="margin-top:8px" placeholder="203.0.113.10&#10;198.51.100.0/28&#10;192.0.2.1-192.0.2.20"></textarea></details>
             <div class="grid" style="margin-top:14px">
               <div><label class="form-label">Default protocol</label><select id="bulkProto"><option value="tcp">TCP</option><option value="udp">UDP</option></select></div>
               <div><label class="form-label">Default port</label><input type="text" id="bulkPort" placeholder="blank = 443" inputmode="numeric"></div>
+              <div><label class="form-label">Expected result</label><select id="bulkExpect"><option value="">No expectation</option><option value="block">Should be blocked</option><option value="allow">Should be allowed</option></select></div>
               <div style="display:flex;align-items:flex-end"><label class="chip on" id="bulkLookupChip"><input type="checkbox" id="bulkLookup" checked>🏷 Look up Zscaler categories</label></div>
             </div>
             <div class="form-hint" id="bulkLookupHint" style="margin-top:8px"></div>
@@ -566,6 +574,30 @@ $('btnSim').onclick = async () => {
   $('btnSim').disabled = false;
 };
 
+// ---------- category lookup (single page) ----------
+const KIND_LABEL = { security: 'threat', risky: 'low collateral', broad: 'broad' };
+$('btnLookup').onclick = async () => {
+  if (!sid) { msg('simMsg', 'Connect first.'); return; }
+  const entries = $('target').value.trim();
+  if (!entries) { msg('simMsg', 'Enter a URL, host or IP in Destination to look up.'); return; }
+  $('btnLookup').disabled = true; $('simMsg').innerHTML = '<span class="spinner"></span> Looking up…';
+  try {
+    const j = await api('/api/lookup', { entries });
+    $('lookupOut').innerHTML = `<div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px"><div><h3>🏷 Zscaler category lookup</h3><p style="font-size:13px">Categories from Zscaler, and the loaded policy rules that use them.</p></div><button class="btn btn-ghost btn-sm" onclick="document.getElementById('lookupOut').innerHTML=''">Close</button></div>`
+      + j.results.map((r) => {
+        if (r.error && !(r.categories || []).length) return `<div class="lk"><div class="hd"><span class="mono">${esc(r.entry)}</span> <span class="err">${esc(r.error)}</span></div></div>`;
+        const cats = [...(r.categories || []), ...(r.security || [])];
+        const chips = cats.map((c) => `<span class="badge kind-${esc(r.kinds[c])}" title="${esc(KIND_LABEL[r.kinds[c]] || '')}">${esc(c)}</span>`).join(' ') || '<span class="empty">no category returned</span>';
+        const rules = cats.flatMap((c) => (r.rules[c] || []).map((x) => Object.assign({ cat: c }, x)));
+        const tbl = rules.length ? `<table><tr><th>Category</th><th>Module</th><th>Rule</th><th>Action</th></tr>${rules.map((x) => `<tr><td class="mono">${esc(x.cat)}</td><td>${esc(x.module)}</td><td>${esc(x.rule)}${x.order != null && x.order >= 0 ? ` <span class="badge b-slate">order ${esc(x.order)}</span>` : ''}${x.disabled ? ' <span class="badge b-slate">disabled</span>' : ''}</td><td>${badgeFor(x.action)}</td></tr>`).join('')}</table>`
+          : `<div class="form-hint" style="margin-top:6px">${j.policyLoaded ? 'No loaded rule references these categories, so the catch-all rules decide.' : 'Load policies to see which rules use these categories.'}</div>`;
+        return `<div class="lk"><div class="hd"><span class="mono">${esc(r.entry)}</span>${r.key && r.key !== r.entry ? `<span class="form-hint">(looked up as ${esc(r.key)})</span>` : ''} ${chips}${r.application ? ` <span class="badge b-blue">☁️ ${esc(r.application)}</span>` : ''}</div>${tbl}</div>`;
+      }).join('') + '</div>';
+    $('simMsg').textContent = '';
+  } catch (e) { msg('simMsg', e.message); }
+  $('btnLookup').disabled = false;
+};
+
 // ---------- step 3: single / bulk mode ----------
 let mode = 'single';
 function setMode(m) {
@@ -613,7 +645,7 @@ $('bulkFile').onchange = () => { const f = $('bulkFile').files[0]; if (f) readBu
 })();
 $('bulkTemplate').onclick = (e) => {
   e.preventDefault();
-  const csv = 'ip,port,protocol,sourceIp,location,destCountry,category,label\r\n203.0.113.10,443,tcp,,,,,single IP\r\n198.51.100.0/28,,,,,,,CIDR (expands to 16 rows)\r\n192.0.2.1-192.0.2.5,443,tcp,,,,,range\r\n8.8.8.8,53,udp,,,,,DNS over UDP\r\n';
+  const csv = 'ip,port,protocol,sourceIp,location,destCountry,category,label,expected\r\n203.0.113.10,443,tcp,,,,,single IP,block\r\n198.51.100.0/28,,,,,,,CIDR (expands to 16 rows),block\r\n192.0.2.1-192.0.2.5,443,tcp,,,,,range,\r\n8.8.8.8,53,udp,,,,,DNS over UDP,allow\r\n';
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'bulk-test-template.csv';
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
@@ -624,7 +656,7 @@ $('btnBulk').onclick = async () => {
   if (!csv.trim()) { msg('bulkMsg', 'Choose a CSV file or paste a list first.'); return; }
   $('btnBulk').disabled = true; $('bulkMsg').innerHTML = '<span class="spinner"></span> Reading the list…';
   try {
-    const j = await api('/api/bulk/start', { csv, fileName: bulkName || 'pasted-list', lookup: $('bulkLookup').checked && !demo, defaultPort: $('bulkPort').value.trim(), defaultProtocol: $('bulkProto').value });
+    const j = await api('/api/bulk/start', { csv, fileName: bulkName || 'pasted-list', lookup: $('bulkLookup').checked && !demo, defaultPort: $('bulkPort').value.trim(), defaultProtocol: $('bulkProto').value, expected: $('bulkExpect').value });
     $('bulkMsg').textContent = ''; renderBulk(j); pollBulk();
   } catch (e) { msg('bulkMsg', e.message); $('btnBulk').disabled = false; }
 };
@@ -664,7 +696,8 @@ function renderBulk(j) {
   const stats = Object.keys(RES).filter((k) => s.counts[k] || k === 'BLOCKED' || k === 'ALLOWED').map((k) => stat(k, s.counts[k], `${RES[k][0]} ${RES[k][1]}`)).join('')
     + stat('COULD', s.couldBlock, '❔ Allowed, but blockable') + (s.errors ? stat('ERR', s.errors, 'Errors') : '');
   const href = (q) => `/api/bulk/result?sessionId=${encodeURIComponent(sid)}${q || ''}`;
-  const dl = j.done ? `<div class="btn-group" style="margin-top:0"><a class="btn btn-success" href="${href()}" download>⬇ Download all results (CSV)</a><a class="btn btn-ghost" href="${href('&only=flagged')}" download>⬇ Flagged rows only</a></div>` : '';
+  const R = s.recommendations;
+  const dl = j.done ? `<div class="btn-group" style="margin-top:0"><a class="btn btn-success" href="${href()}" download>⬇ Download all results (CSV)</a>${R && R.misses ? `<a class="btn btn-ghost" href="${href('&only=mismatch')}" download>⬇ Not as expected only</a>` : `<a class="btn btn-ghost" href="${href('&only=flagged')}" download>⬇ Flagged rows only</a>`}</div>` : '';
   let more = '';
   if (!running && j.done) {
     const rules = (s.topRules || []).length
@@ -674,11 +707,16 @@ function renderBulk(j) {
       ? `<table><tr><th>Category</th><th style="text-align:right">Rows</th></tr>${s.topCategories.map((c) => `<tr><td class="mono">${esc(c.category)}</td><td style="text-align:right">${num(c.count)}</td></tr>`).join('')}</table>` : '';
     const pv = j.preview || [];
     const prev = pv.length
-      ? `<div class="tablewrap"><table><tr><th>Destination</th><th>Category</th><th>Result</th><th>Module · rule</th><th>Could be blocked by</th></tr>${pv.map((r) => `<tr><td class="mono">${esc(r.target)}${r.label ? `<div class="form-hint">${esc(r.label)}</div>` : ''}</td><td class="mono">${esc(r.category || '')}${r.securityCategory ? ` <span class="badge b-red">${esc(r.securityCategory)}</span>` : ''}</td><td>${r.error ? '<span class="badge b-red">error</span>' : actBadge(r.action)}</td><td>${r.error ? `<span class="err">${esc(r.error)}</span>` : `${esc(r.module || '')}${r.rule ? ` · <b>${esc(r.rule)}</b>` : ''}`}</td><td class="form-hint">${esc(r.couldBlock || '')}</td></tr>`).join('')}</table></div>${pv.length >= 200 ? '<div class="form-hint" style="margin-top:6px">Showing the first 200 flagged rows. The CSV has all of them.</div>' : ''}`
+      ? `<div class="tablewrap"><table><tr><th>Destination</th><th>Category</th><th>Result</th><th>Module · rule</th><th>${R ? 'Recommendation' : 'Could be blocked by'}</th></tr>${pv.map((r) => `<tr><td class="mono">${esc(r.target)}${r.label ? `<div class="form-hint">${esc(r.label)}</div>` : ''}</td><td class="mono">${esc(r.category || '')}${r.securityCategory ? ` <span class="badge b-red">${esc(r.securityCategory)}</span>` : ''}</td><td>${r.error ? '<span class="badge b-red">error</span>' : actBadge(r.action)}${r.expected ? `<div class="form-hint">expected ${esc(r.expected.toLowerCase())}</div>` : ''}</td><td>${r.error ? `<span class="err">${esc(r.error)}</span>` : `${esc(r.module || '')}${r.rule ? ` · <b>${esc(r.rule)}</b>` : ''}`}</td><td class="form-hint">${R ? (r.area ? `<span class="area-tag">${esc(r.area)}</span> ` : '') + esc(r.recommendation || '') : esc(r.couldBlock || '')}</td></tr>`).join('')}</table></div>${pv.length >= 200 ? '<div class="form-hint" style="margin-top:6px">Showing the first 200 flagged rows. The CSV has all of them.</div>' : ''}`
       : '<div class="empty">Nothing flagged: every row was allowed and no condition would block it.</div>';
-    more = `<div class="two"><div class="card"><div class="card-header"><h3>What decided the rows that weren't allowed</h3></div>${rules}</div>
+    const AREA_ICON = { ATP: '🛡', Firewall: '🧱', 'URL Filtering': '🌐', DNS: '🔤', 'Client Connector': '💻', 'Cloud App': '☁️' };
+    const recCard = R ? `<div class="card"><div class="card-header"><h3>Recommendations</h3><p style="font-size:13px">Rows checked against the expected result, and the best place in policy to fix the ones that don't match.</p></div>
+      <div style="display:flex;gap:2rem;flex-wrap:wrap;margin-bottom:12px"><div><div class="meets" style="color:#6ee7b7">${num(R.meets)}</div><div class="form-hint">meet the expectation</div></div><div><div class="meets" style="color:${R.misses ? '#fca5a5' : '#6ee7b7'}">${num(R.misses)}</div><div class="form-hint">don't</div></div></div>
+      ${R.byArea.length ? `<div class="tablewrap"><table><tr><th>Expected</th><th>Fix in</th><th style="text-align:right">Rows</th><th>What to do (first example)</th><th></th></tr>${R.byArea.map((a) => `<tr><td>${actBadge(a.expected)}</td><td><span class="area-tag">${AREA_ICON[a.area] || '•'} ${esc(a.area)}</span></td><td style="text-align:right">${num(a.count)}</td><td>${esc(a.recommendation)}<div class="form-hint mono">${a.examples.map(esc).join(', ')}${a.count > a.examples.length ? ' …' : ''}</div></td><td><a class="linkbtn" href="${href('&list=mismatch&area=' + encodeURIComponent(a.area))}" download title="One destination per line, to paste into an IP group or custom URL category">⬇ list</a></td></tr>`).join('')}</table></div>` : '<div class="empty">Everything matches the expected result.</div>'}
+      ${R.categories.length ? `<div class="section-title" style="margin-top:18px">By category</div><div class="tablewrap"><table><tr><th>Expected</th><th>Category</th><th style="text-align:right">Rows</th><th>Recommendation</th></tr>${R.categories.map((c) => `<tr><td>${actBadge(c.expected)}</td><td class="mono">${esc(c.category)} ${c.kind !== 'none' ? `<span class="badge kind-${esc(c.kind)}">${{ security: 'threat', risky: 'low collateral', broad: 'broad' }[c.kind] || ''}</span>` : ''}</td><td style="text-align:right">${num(c.count)}</td><td>${esc(c.advice)}</td></tr>`).join('')}</table></div>` : ''}</div>` : '';
+    more = recCard + `<div class="two"><div class="card"><div class="card-header"><h3>What decided the rows that weren't allowed</h3></div>${rules}</div>
       <div class="card"><div class="card-header"><h3>Zscaler categories</h3><p style="font-size:13px">${num(s.lookedUp)} rows categorised by Zscaler lookup</p></div>${cats}</div></div>
-      <div class="card"><div class="card-header"><h3>Flagged rows</h3><p style="font-size:13px">Blocked, bypassed, isolated or cautioned, plus allowed rows that a condition such as user or location could block.</p></div>${prev}</div>`;
+      <div class="card"><div class="card-header"><h3>${R ? "Rows that don't match the expected result" : 'Flagged rows'}</h3><p style="font-size:13px">${R ? 'Each with the recommended fix.' : 'Blocked, bypassed, isolated or cautioned, plus allowed rows that a condition such as user or location could block.'}</p></div>${prev}</div>`;
   }
   $('bulkOut').innerHTML = `<div class="card"><div class="card-header"><h3>${running ? '<span class="spinner"></span> ' : ''}${phase}</h3></div><div class="progress"><div style="width:${pct.toFixed(1)}%"></div></div>${notes.map((n) => `<div class="note">${n}</div>`).join('')}<div class="stats">${stats}</div>${dl}</div>${more}`;
 }

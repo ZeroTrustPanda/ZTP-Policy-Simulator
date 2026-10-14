@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.0 — 2026-10-14
+- Single page: 🏷 Look up category (up to 100 entries) with category risk tag, cloud app and the rules referencing each category.
+- Bulk: expected result (run-wide or `expected` column); per-row meets / recommended area / recommendation; Recommendations card by area and by category; per-area destination list download; "Not as expected only" CSV.
+- Lookup keeps Zscaler's cloud `application` when returned.
+
 ## 1.2.1 — 2026-10-14
 - Bulk category lookup: retry 412 / 5xx / network errors with backoff; treat 401/403 after successful calls as a quota (pause and retry, up to ~2 h) instead of stopping; only a first-call refusal means not permitted.
 - Failed lookups are not cached as final, so a rerun retries them.

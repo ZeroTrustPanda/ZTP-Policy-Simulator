@@ -2,6 +2,7 @@
 // Bulk testing: parse a CSV of destinations (IPs, CIDRs, ranges or hosts), look up Zscaler categories in batches,
 // simulate each row against the loaded policy, and produce a results CSV plus a summary.
 const M = require('./matchers');
+const R = require('./recommend');
 
 const MAX_ROWS = 250000;          // total addresses after CIDR/range expansion
 const MAX_PER_ENTRY = 65536;      // a /16 per row at most
@@ -35,6 +36,7 @@ const ALIASES = {
   categories: ['category', 'categories', 'urlcategory', 'url_category'],
   user: ['user', 'username', 'email'],
   label: ['label', 'name', 'note', 'notes', 'comment', 'description', 'tag'],
+  expected: ['expected', 'expect', 'expectation', 'should', 'desired', 'intent', 'expectedaction', 'expected_action'],
 };
 function headerKey(cell) {
   const c = String(cell || '').toLowerCase().replace(/[\s-]/g, '');
@@ -109,10 +111,18 @@ function lookupKey(target) {
   return t.host;
 }
 
+// Normalise one urlLookup result. `application` (the cloud app Zscaler maps the URL to) is optional in the response.
+function fromLookup(o) {
+  const a = o.application;
+  const app = typeof a === 'string' ? a : a && (a.name || a.displayName || a.id) ? String(a.name || a.displayName || a.id) : '';
+  return { categories: o.urlClassifications || [], security: o.urlClassificationsWithSecurityAlert || [], application: /^(none|null)?$/i.test(app) ? '' : app };
+}
+
 // ---------- results ----------
 const COLUMNS = [
   ['row', 'Row'], ['line', 'Input line'], ['input', 'Input'], ['target', 'Destination'], ['port', 'Port'], ['protocol', 'Protocol'], ['label', 'Label'],
-  ['category', 'Zscaler category'], ['securityCategory', 'Security alert category'], ['categorySource', 'Category source'],
+  ['category', 'Zscaler category'], ['securityCategory', 'Security alert category'], ['application', 'Zscaler cloud app'], ['categorySource', 'Category source'],
+  ['expected', 'Expected'], ['meets', 'Meets expectation'], ['area', 'Recommended area'], ['recommendation', 'Recommendation'],
   ['result', 'Result'], ['action', 'Policy rule action'], ['module', 'Deciding module'], ['rule', 'Deciding rule'], ['order', 'Rule order'],
   ['firewall', 'Firewall'], ['firewallRule', 'Firewall rule'], ['urlFiltering', 'URL filtering'], ['urlRule', 'URL filtering rule'], ['forwarding', 'Client Connector forwarding'],
   ['couldBlock', 'Could be blocked by'], ['conditions', 'Conditions that change the result'], ['notes', 'Notes'], ['error', 'Error'],
@@ -127,7 +137,7 @@ function toCsv(results, filter) {
   return [head, ...body].join('\r\n') + '\r\n';
 }
 
-function resultRow(i, row, out, cat) {
+function resultRow(i, row, out, cat, expected, data) {
   const s = out.summary, p = s.primary || {};
   const mod = (name) => out.modules.find((m) => m.module === name) || {};
   const fw = mod('Firewall'), url = mod('URL Filtering'), fwd = out.modules.find((m) => m.module.startsWith('Forwarding')) || {};
@@ -136,21 +146,23 @@ function resultRow(i, row, out, cat) {
   const blk = p.action === 'BLOCK' ? null : (s.alsoBasedOn || []).find((c) => c.action === 'BLOCK' && ['identity', 'location', 'other'].includes(c.kind)
     && !(noCat && /category/i.test(c.condition || '')));
   const notes = (out.context.notes || []).filter((n) => !/^No port entered/.test(n));
-  return {
+  const r = {
     row: i + 1, line: row.line, input: row.input, target: row.target,
     port: out.context.port, protocol: (out.context.protocol || 'tcp').toUpperCase(), label: row.label || '',
     category: (cat.categories || []).join('; '), securityCategory: (cat.security || []).join('; '), categorySource: cat.source,
     result: s.overall, action: p.action, module: p.module, rule: p.rule || '', order: p.order != null && p.order >= 0 ? p.order : '',
-    firewall: fw.verdict || '', firewallRule: fw.decidingRule ? fw.decidingRule.name : '',
+    application: cat.application || '',
+    firewall: fw.verdict || '', firewallRule: fw.decidingRule ? fw.decidingRule.name : '', firewallOrder: fw.decidingRule && fw.decidingRule.order >= 0 ? fw.decidingRule.order : '',
     urlFiltering: url.verdict || '', urlRule: url.decidingRule ? url.decidingRule.name : '',
     forwarding: fwd.verdict || '',
     couldBlock: blk ? `${blk.condition} → rule "${blk.rule || blk.module}"` : '',
     conditions: (s.alsoBasedOn || []).length,
     notes: notes.slice(0, 3).join(' | '), error: '',
   };
+  return Object.assign(r, R.recommendRow(r, expected, data || {}));
 }
 
-function summarizeJob(results) {
+function summarizeJob(results, data) {
   const counts = {}, rules = {}, cats = {};
   let lookedUp = 0, errors = 0, couldBlock = 0;
   for (const r of results) {
@@ -163,7 +175,7 @@ function summarizeJob(results) {
   }
   const top = (o, n) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, n);
   return {
-    counts, errors, lookedUp, couldBlock,
+    counts, errors, lookedUp, couldBlock, recommendations: R.summarizeRecommendations(results, data || {}),
     topRules: top(rules, 15).map(([k, n]) => { const [module, rule, action] = k.split('|'); return { module, rule, action, count: n }; }),
     topCategories: top(cats, 15).map(([category, count]) => ({ category, count })),
   };
@@ -198,7 +210,7 @@ async function lookupAll(job, client, keys, cache, urlLookup, batchSize, timing 
       const byKey = new Map(out.map((o) => [String(o.url || '').toLowerCase(), o]));
       for (const k of batch) {
         const o = byKey.get(k.toLowerCase());
-        cache.set(k, o ? { categories: o.urlClassifications || [], security: o.urlClassificationsWithSecurityAlert || [] } : { categories: [], security: [], error: 'not returned by lookup' });
+        cache.set(k, o ? fromLookup(o) : { categories: [], security: [], error: 'not returned by lookup' });
       }
       job.lookup.done += batch.length; job.lookup.okCalls++; i += batch.length; transientTries = 0; refusedTries = 0;
     } catch (e) {
@@ -236,6 +248,7 @@ async function lookupAll(job, client, keys, cache, urlLookup, batchSize, timing 
 
 // deps: { buildContext(session, body), simulate(snap, ctx, manual), urlLookup, URL_LOOKUP_MAX }
 async function runJob(session, job, rows, opts, deps) {
+  job.data = (session.snap && session.snap.data) || {};
   try {
     const cache = session.catCache || (session.catCache = new Map());
     if (opts.lookup && session.client) {
@@ -248,7 +261,7 @@ async function runJob(session, job, rows, opts, deps) {
       const key = lookupKey(row.target);
       let cat;
       if (row.categories) cat = { categories: row.categories.split(/[|; ]+/).map((c) => c.trim().toUpperCase()).filter(Boolean), security: [], source: 'file' };
-      else if (key && cache.has(key)) { const c = cache.get(key); cat = { categories: c.categories, security: c.security, source: c.error ? `lookup failed: ${c.error}` : 'Zscaler lookup' }; }
+      else if (key && cache.has(key)) { const c = cache.get(key); cat = { categories: c.categories, security: c.security, application: c.application, source: c.error ? `lookup failed: ${c.error}` : 'Zscaler lookup' }; }
       else cat = { categories: [], security: [], source: !(opts.lookup && session.client) ? 'lookup off' : job.lookup && job.lookup.stoppedKind === 'denied' ? 'lookup not permitted' : job.lookup && job.lookup.stoppedKind === 'quota' ? 'lookup stopped (Zscaler quota): rerun later' : 'not looked up' };
       try {
         const body = {
@@ -259,7 +272,7 @@ async function runJob(session, job, rows, opts, deps) {
         };
         const ctx = await deps.buildContext(session, body);
         const out = deps.simulate(session.snap, ctx, {});
-        job.results.push(resultRow(i, row, out, cat));
+        job.results.push(resultRow(i, row, out, cat, R.normExpected(row.expected) || opts.expected || '', job.data));
       } catch (e) {
         job.results.push({ row: i + 1, line: row.line, input: row.input, target: row.target, label: row.label || '', categorySource: cat.source, error: e.message.slice(0, 200) });
       }
@@ -271,18 +284,19 @@ async function runJob(session, job, rows, opts, deps) {
     job.phase = 'error'; job.error = e.message;
   }
   job.finished = Date.now();
-  job.summary = summarizeJob(job.results);
+  job.summary = summarizeJob(job.results, job.data);
 }
 
 function status(job, { full = false } = {}) {
   if (!job) return null;
   const finished = ['done', 'cancelled', 'error'].includes(job.phase);
-  const summary = finished ? job.summary : summarizeJob(job.results);
-  const preview = job.results.filter((r) => r.error || r.action !== 'ALLOW' || r.couldBlock).slice(0, PREVIEW_ROWS);
+  const summary = finished ? job.summary : summarizeJob(job.results, job.data);
+  const anyExp = summary.recommendations && summary.recommendations.expectedRows;
+  const preview = job.results.filter(anyExp ? (r) => r.error || r.meets === 'no' : (r) => r.error || r.action !== 'ALLOW' || r.couldBlock).slice(0, PREVIEW_ROWS);
   return {
     id: job.id, phase: job.phase, error: job.error, total: job.total, done: job.done, started: job.started, finished: job.finished,
-    lookup: job.lookup, parse: job.parse, summary, preview: finished || full ? preview : preview.slice(0, 25), cancelled: job.cancelled,
+    lookup: job.lookup, parse: job.parse, expectation: job.expectation || '', summary, preview: finished || full ? preview : preview.slice(0, 25), cancelled: job.cancelled,
   };
 }
 
-module.exports = { parseCsv, expand, lookupKey, toCsv, runJob, status, summarizeJob, COLUMNS, MAX_ROWS, MAX_PER_ENTRY };
+module.exports = { parseCsv, expand, lookupKey, fromLookup, toCsv, runJob, status, summarizeJob, COLUMNS, MAX_ROWS, MAX_PER_ENTRY };

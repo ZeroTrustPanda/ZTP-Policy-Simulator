@@ -1,6 +1,6 @@
 # 🐼 ZeroTrustPanda ZS Policy Simulator
 
-**Downloads (v1.2.1):** [Windows x64](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.2.1/ZTP-Policy-Simulator-1.2.1-windows-x64.zip) · [macOS Apple Silicon](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.2.1/ZTP-Policy-Simulator-1.2.1-macos-arm64.zip) · [macOS Intel](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.2.1/ZTP-Policy-Simulator-1.2.1-macos-x64.zip) · [SHA256SUMS](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.2.1/SHA256SUMS.txt) — all builds in [`downloads/`](downloads/). Release notes: [RELEASE_NOTES.md](RELEASE_NOTES.md) · history: [CHANGELOG.md](CHANGELOG.md)
+**Downloads (v1.3.0):** [Windows x64](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.3.0/ZTP-Policy-Simulator-1.3.0-windows-x64.zip) · [macOS Apple Silicon](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.3.0/ZTP-Policy-Simulator-1.3.0-macos-arm64.zip) · [macOS Intel](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.3.0/ZTP-Policy-Simulator-1.3.0-macos-x64.zip) · [SHA256SUMS](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.3.0/SHA256SUMS.txt) — all builds in [`downloads/`](downloads/). Release notes: [RELEASE_NOTES.md](RELEASE_NOTES.md) · history: [CHANGELOG.md](CHANGELOG.md)
 
 Standalone, read-only tool that answers "would this be allowed, blocked or bypassed — and by what?" against your live Zscaler policy. Same look as the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustPanda/ZTP-Policy-Wizard).
 
@@ -31,9 +31,17 @@ Switch the Simulate step to **📋 Bulk test (CSV)** to run thousands of destina
   - the firewall and URL filtering verdicts with their rules
   - the Client Connector forwarding verdict
   - "Could be blocked by", for user, location or time conditions that would block an allowed row
+- **Expected result and recommendations:** set **Expected result** (Should be blocked / Should be allowed) for the whole run, or add an `expected` column (block / allow) per row. Each row gets *Meets expectation*, *Recommended area* and *Recommendation*, and the report adds a **Recommendations** card:
+  - **By area:** how many rows to fix where (🛡 ATP, 🧱 Firewall, 🌐 URL Filtering, 🔤 DNS, 💻 Client Connector, ☁️ Cloud App), what to do, and a **⬇ list** of the destinations, one per line, to paste into an IP destination group or custom URL category.
+  - **By category:** whether to block or allow each category. Threat categories go to ATP. Low-collateral categories such as `MISCELLANEOUS_OR_UNKNOWN`, `NEWLY_REG_DOMAINS` and `ANONYMIZER` can be blocked outright. Broad business categories should stay as they are; list the destinations instead.
+  - **How the area is chosen:** a threat category whose ATP setting is off → turn on the ATP setting. An IP with a broad category or none → a Firewall IP destination group in a Block rule above the allowing rule, which covers all ports. A host → a custom URL category in URL Filtering (or the ATP denylist), plus DNS Control. A Client Connector bypass → fix the app profile. Expected allow but blocked → an ATP allowlist entry or a custom-category Allow rule above the blocking rule, not unblocking the category for everyone.
+  - **Downloads:** **Not as expected only** downloads just the mismatches.
 - **What an IP can match:** Client Connector inclusions, exclusions and bypasses; firewall destination IPs, IP groups, IP categories and countries; custom URL categories that list IP ranges; URL filtering category rules (once the category is known); ZPA segments defined by IP or CIDR. DNS Control doesn't apply to a bare IP, because there's no DNS lookup.
 
 Single simulations of a single IP or host now also show its Zscaler category (`category: … (Zscaler lookup)`).
+
+## Category lookup (single page)
+**🏷 Look up category** next to Simulate looks up the Destination with Zscaler (up to 100 entries, separated by commas or spaces). It shows each category, tagged *threat*, *low collateral* or *broad*, plus any cloud app Zscaler maps it to, and lists every loaded rule that uses that category (URL Filtering, Firewall, DNS, SSL Inspection, ATP setting) with its order and action. It needs a live tenant connection.
 
 ## Run
 - Windows: `ZTP-Policy-Simulator.exe` — serves http://127.0.0.1:8787 and opens your browser (`PORT`, `NO_OPEN=1` supported).
@@ -51,6 +59,7 @@ Single simulations of a single IP or host now also show its Zscaler category (`c
 - `src/zscaler.js` — OneAPI client and policy loader
 - `src/engine.js` — ordered rule evaluation and outcome model
 - `src/zcc.js` — Client Connector per-profile forwarding evaluation
+- `src/recommend.js` — expected-vs-actual recommendations, category advice, rules per category
 - `src/bulk.js` — CSV parsing, CIDR/range expansion, batched category lookup, results CSV
 - `src/matchers.js` — wildcard domain, IP/CIDR/range, port and PAC matching
 - `public/index.html` — single-file UI
