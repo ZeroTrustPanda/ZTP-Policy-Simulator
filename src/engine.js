@@ -558,33 +558,75 @@ function mAtp(snap, ctx) {
 }
 
 // ZPA access policy
+// ZPA application segment matching (not ZIA URL semantics):
+//   "host.example.com" matches that exact FQDN only; "*.example.com" (or ".example.com") matches any subdomain
+//   but not example.com itself; IPs/CIDRs match addresses inside them. When several segments match, ZPA uses the
+//   single most specific one (exact FQDN > longer wildcard suffix; longer IP prefix), among segments whose ports fit.
+// Returns rel 'match' | 'partial' (wildcard query that overlaps a narrower entry) | 'none', plus a specificity score.
+function zpaDomainRel(t, entry) {
+  let e = String(entry || '').trim().toLowerCase().replace(/^[a-z]+:\/\//, '').replace(/[/:].*$/, '');
+  if (!e) return { rel: 'none' };
+  const wild = /^\*\.|^\./.test(e), base = e.replace(/^\*\./, '').replace(/^\./, '');
+  const labels = base.split('.').length;
+  const h = t.host, within = (x, b) => x.endsWith('.' + b);
+  if (!t.isWildcard) {
+    if (!wild) return h === base ? { rel: 'match', score: 1000 + labels } : { rel: 'none' };
+    if (base.includes('*')) { const re = new RegExp('^' + ('*.' + base).replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^.]*(?:\\.[^.]*)*') + '$'); return re.test(h) ? { rel: 'match', score: labels } : { rel: 'none' }; }
+    return within(h, base) ? { rel: 'match', score: labels } : { rel: 'none' };
+  }
+  const q = h.replace(/^\*\./, '');
+  if (wild) {
+    if (q === base || within(q, base)) return { rel: 'match', score: labels };
+    if (within(base, q)) return { rel: 'partial', score: labels };
+    return { rel: 'none' };
+  }
+  return within(base, q) ? { rel: 'partial', score: 1000 + labels } : { rel: 'none' };
+}
+function zpaSegPorts(a, ctx) {
+  const raw = ctx.protocol === 'udp' ? a.udpPortRanges || a.udpPortRange : a.tcpPortRanges || a.tcpPortRange;
+  let ranges = [];
+  if (Array.isArray(raw) && raw.length && raw.every((x) => typeof x === 'string' || typeof x === 'number') && raw.every((x) => /^\d+$/.test(String(x)))) {
+    for (let i = 0; i + 1 < raw.length; i += 2) ranges.push([+raw[i], +raw[i + 1]]); // ZPA returns flat [from,to,from,to]
+  } else if (Array.isArray(raw) && raw.length && typeof raw[0] === 'object') ranges = raw.map((p) => [+p.from, +(p.to == null ? p.from : p.to)]);
+  else ranges = M.parsePorts(raw);
+  return ranges;
+}
 function zpaMatch(snap, ctx) {
   const t = ctx.target;
   const apps = arr(snap.zpaApps);
-  if (!t) return { apps: [], groups: [] };
-  const matched = [];
+  if (!t) return { apps: [], groups: [], candidates: [], partial: [], skipped: [] };
+  const full = [], partial = [], skipped = [];
   for (const a of apps) {
     if (lc(a.enabled) === 'false') continue;
     const dom = arr(a.domainNames);
-    const r = M.domainInList(t, dom.filter((d) => !M.parseIpRange(d)));
-    let ipRel = { rel: 'none' };
-    if (t.isIp) ipRel = M.ipInList(t.host, dom.filter((d) => M.parseIpRange(d)));
-    const rel = r.rel !== 'none' ? r.rel : ipRel.rel;
-    if (rel === 'none') continue;
-    let portOk = true, portNote = '';
-    if (ctx.port != null) {
-      const raw = ctx.protocol === 'udp' ? a.udpPortRanges || a.udpPortRange : a.tcpPortRanges || a.tcpPortRange;
-      let ranges = [];
-      if (Array.isArray(raw) && raw.length && typeof raw[0] === 'string' && raw.every((x) => /^\d+$/.test(x))) {
-        for (let i = 0; i + 1 < raw.length; i += 2) ranges.push([+raw[i], +raw[i + 1]]); // ZPA returns flat [from,to,from,to]
-      } else if (Array.isArray(raw) && raw.length && typeof raw[0] === 'object') {
-        ranges = raw.map((p) => [+p.from, +p.to]);
-      } else ranges = M.parsePorts(raw);
-      if (ranges.length) portOk = M.portInRanges(ctx.port, ranges);
+    let best = { rel: 'none' }, via = null;
+    for (const d of dom) {
+      const r = M.parseIpRange(d)
+        ? (t.isIp ? (() => { const x = M.ipInList(t.host, [d]); return x.rel === 'none' ? x : { rel: x.rel, score: 2000 + (+(String(d).split('/')[1] || 32)) }; })() : { rel: 'none' })
+        : t.isIp ? { rel: 'none' } : zpaDomainRel(t, d);
+      if (r.rel === 'none') continue;
+      const better = best.rel === 'none' || (r.rel === 'match' && best.rel !== 'match') || (r.rel === best.rel && r.score > best.score);
+      if (better) { best = r; via = d; }
     }
-    if (portOk) matched.push({ id: a.id, name: a.name, segmentGroupId: a.segmentGroupId, rel, via: r.entry || ipRel.entry });
+    if (best.rel === 'none') continue;
+    if (ctx.port != null) {
+      const ranges = zpaSegPorts(a, ctx);
+      if (ranges.length && !M.portInRanges(ctx.port, ranges)) {
+        skipped.push({ id: a.id, name: a.name, via, reason: `${(ctx.protocol || 'tcp').toUpperCase()} ${ctx.port} is not in its ports (${ranges.map(([x, y]) => (x === y ? x : `${x}-${y}`)).join(', ')}); enter one of those ports to test it` });
+        continue;
+      }
+    }
+    const m = { id: a.id, name: a.name, segmentGroupId: a.segmentGroupId, rel: best.rel, via, score: best.score };
+    (best.rel === 'match' ? full : partial).push(m);
   }
-  return { apps: matched, groups: [...new Set(matched.map((m) => String(m.segmentGroupId)).filter(Boolean))] };
+  full.sort((x, y) => y.score - x.score);
+  partial.sort((x, y) => y.score - x.score);
+  // ZPA uses only the most specific full match. A wildcard query with no full match overlaps narrower segments.
+  const used = full.length ? [full[0]] : partial;
+  return {
+    apps: used, groups: [...new Set(used.map((m) => String(m.segmentGroupId)).filter(Boolean))],
+    candidates: full, partial: full.length ? partial : [], partialOnly: !full.length && partial.length > 0, skipped,
+  };
 }
 // ZPA operand evaluation shared by access and client forwarding policy: app / segment group are known, the rest
 // (SCIM, SAML, posture, client type, trusted network…) depends on user and device context.
@@ -620,9 +662,28 @@ function mZpa(snap, ctx) {
   if (!snap.zpaApps && !snap.zpaAccessRules) return null;
   const z = zpaMatch(snap, ctx);
   const out = { module: 'ZPA Access Policy', verdict: 'NOT_A_ZPA_APP', confidence: 'definite', decidingRule: null, couldOverride: [], rules: [], considered: 0, matchedSegments: z.apps, stages: [], reason: 'Destination does not match any ZPA application segment, so ZPA does not carry it' };
-  if (!z.apps.length) return out;
+  if (z.partialOnly) {
+    const list = z.apps.map((a) => `"${a.name}" (${a.via})`).join(', ');
+    out.stages.push({ step: 'Application segment', status: 'unknown', detail: `no segment covers all of ${ctx.target.host}; narrower segments inside it: ${list}` });
+    return Object.assign(out, { confidence: 'conditional', matchedSegments: [], partialSegments: z.apps,
+      reason: `No ZPA segment covers all of ${ctx.target.host}, so most hosts under it are internet traffic. Some hosts are ZPA applications: ${list}`,
+      note: 'Simulate one of those hosts to see its ZPA result.' });
+  }
+  if (!z.apps.length) {
+    const hints = [];
+    if (z.skipped.length) hints.push(`Matched by domain but not port: ${z.skipped.map((x) => `"${x.name}" (${x.via}) — ${x.reason}`).join('; ')}`);
+    if (ctx.target && !ctx.target.isIp && !ctx.target.isWildcard) {
+      const apexOf = arr(snap.zpaApps).filter((a) => arr(a.domainNames).some((d) => /^(\*\.|\.)/.test(String(d)) && String(d).toLowerCase().replace(/^\*?\./, '') === ctx.target.host)).map((a) => `"${a.name}"`);
+      if (apexOf.length) hints.push(`${apexOf.join(', ')} list *.${ctx.target.host}, which covers subdomains only. Add ${ctx.target.host} itself to the segment for ZPA to carry it.`);
+    }
+    if (hints.length) { out.note = hints.join(' '); out.stages.push({ step: 'Application segment', status: 'nomatch', detail: hints.join(' ') }); }
+    return out;
+  }
   const seg = arr(snap.zpaApps).find((a) => String(a.id) === String(z.apps[0].id)) || {};
-  out.stages.push({ step: 'Application segment', status: 'match', detail: `${z.apps.map((a) => `"${a.name}" (${a.via})`).join(', ')}` });
+  const segDetail = `"${z.apps[0].name}" (${z.apps[0].via})${z.candidates.length > 1 ? `, the most specific of ${z.candidates.length} matching segments; also matched: ${z.candidates.slice(1).map((a) => `"${a.name}" (${a.via})`).join(', ')}` : ''}`;
+  out.stages.push({ step: 'Application segment', status: 'match', detail: segDetail });
+  if (z.partial.length) out.note = `Hosts under ${ctx.target.host} that have their own segment use it instead: ${z.partial.map((a) => `"${a.name}" (${a.via})`).join(', ')}. Simulate one of those hosts to see its result.`;
+  if (z.skipped.length) out.stages.push({ step: 'Segments skipped for port', status: 'nomatch', detail: z.skipped.map((x) => `"${x.name}" (${x.via}): ${x.reason}`).join('; ') });
   // Segment Bypass setting
   const bt = String(seg.bypassType || 'NEVER').toUpperCase();
   if (bt === 'ALWAYS') {
@@ -843,6 +904,7 @@ function summarize(modules, ctx = {}) {
   let zia;
   const zpaDecides = !!(zpa && ['ALLOW', 'BLOCK'].includes(zpa.verdict));
   if (zpa && zpa.verdict === 'ZPA_BYPASS') lines.push(`${zpa.reason}.`);
+  if (zpa && zpa.verdict === 'NOT_A_ZPA_APP' && (zpa.note || zpa.partialSegments)) lines.push(`ZPA: ${zpa.partialSegments ? zpa.reason + '. ' : ''}${zpa.note || ''}`.trim());
   if (zpaDecides) {
     zia = pick(zpa, zpa.verdict === 'BLOCK' ? 'BLOCK' : 'ALLOW');
     lines.push(`Destination is a ZPA application segment (${(zpa.matchedSegments || []).map((x) => x.name).join(', ')}): ZPA carries it and its access policy decides; ZIA policy and internet bypasses don't apply.`);

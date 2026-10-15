@@ -361,3 +361,27 @@ test('ZPA customer ID candidates come from token claims, named claims first', ()
   assert.deepEqual(c, ['72058304855015424', '123456789012345678']);
   assert.deepEqual(zpaIdCandidates(jwtClaims('not-a-jwt')), []);
 });
+
+test('ZPA segment matching: exact FQDN only, wildcard is subdomains only, most specific segment wins', () => {
+  const { simulate } = require('../src/engine');
+  const data = JSON.parse(JSON.stringify(require('../src/demo-snapshot.json')));
+  data.zpaApps.push(
+    { id: '8001', name: 'ZTH Wildcard', domainNames: ['*.zerotrusthospital.org'], segmentGroupId: '5001', bypassType: 'NEVER', tcpPortRanges: ['1', '65535'] },
+    { id: '8002', name: 'ZTH PACS', domainNames: ['pacs.zerotrusthospital.org'], segmentGroupId: '5001', bypassType: 'NEVER', tcpPortRanges: ['104', '104'] },
+    { id: '8003', name: 'Exact apex', domainNames: ['example.org'], segmentGroupId: '5001', bypassType: 'NEVER', tcpPortRanges: ['1', '65535'] });
+  data.zpaAccessRules.unshift(
+    { id: 'r1', name: 'Allow ZTH wildcard', action: 'ALLOW', ruleOrder: '1', conditions: [{ operands: [{ objectType: 'APP', rhs: '8001' }] }] },
+    { id: 'r2', name: 'Deny ZTH PACS', action: 'DENY', ruleOrder: '2', conditions: [{ operands: [{ objectType: 'APP', rhs: '8002' }] }] });
+  const z = (t, port) => simulate({ data }, { target: M.parseTarget(t), port: port || null, protocol: 'tcp', categories: [], resolvedIps: [], groups: [], notes: [], useZpa: true }, {}).modules[0];
+  assert.equal(z('pacs.zerotrusthospital.org', 104).verdict, 'BLOCK');            // exact PACS segment beats the wildcard
+  assert.equal(z('pacs.zerotrusthospital.org', 104).decidingRule.name, 'Deny ZTH PACS');
+  assert.equal(z('pacs.zerotrusthospital.org', 443).decidingRule.name, 'Allow ZTH wildcard'); // PACS segment lacks 443
+  assert.equal(z('ehr.zerotrusthospital.org').verdict, 'ALLOW');
+  const apex = z('zerotrusthospital.org');
+  assert.equal(apex.verdict, 'NOT_A_ZPA_APP');                                       // *.x is subdomains only
+  assert.match(apex.note, /covers subdomains only/);
+  assert.equal(z('www.example.org').verdict, 'NOT_A_ZPA_APP');                      // exact entry is not a suffix
+  assert.equal(z('example.org').verdict, 'BLOCK');                                   // matched, no access rule → ZPA default deny
+  const w = z('*.hospital.example');                                                 // only narrower segments → ZIA decides
+  assert.equal(w.verdict, 'NOT_A_ZPA_APP'); assert.equal(w.confidence, 'conditional');
+});

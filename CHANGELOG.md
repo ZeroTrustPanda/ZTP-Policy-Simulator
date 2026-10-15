@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.5.2 — 2026-10-15
+- ZPA segment matching uses ZPA semantics: exact FQDN entries, *.domain = subdomains only, most specific segment wins (port-aware); hint when the apex is only covered by a wildcard; wildcard queries overlapping only narrower segments fall through to ZIA.
+
 ## 1.5.1 — 2026-10-15
 - ZPA moved to a Load policies product chip (with ZIA and Client Connector); the Connect form no longer has a ZPA customer ID field.
 - ZPA uses the same OneAPI client: customer ID read from the token claims when present (verified against ZPA), otherwise asked inline once in Load policies, verified, and remembered per tenant.
