@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.6.3 — 2026-10-15
+- ZPA: posture-only open conditions evaluated as pass/fail scenarios in rule order (handles deny-if-fails above allow-if-passes); verified on a live ZTH snapshot.
+
 ## 1.6.2 — 2026-10-15
 - ZPA SCIM membership lookup per SCIM IdP (scimUserName filter, ignored-filter guard); SCIM_GROUP matched by ID.
 - Not-found diagnostics for ZIdentity and ZPA SCIM in the result notes.

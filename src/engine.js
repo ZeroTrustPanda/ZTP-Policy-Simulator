@@ -673,7 +673,7 @@ function zpaEvalRules(rules, z, snap = {}, ctx = {}) {
         }
         if (t === 'POSTURE') {
           const pp = arr(snap.zpaPostureProfiles).find((x) => String(x.postureUdid || x.id) === String(o.lhs));
-          return { s: 'unknown', d: `device posture "${(pp && pp.name) || o.lhs}" ${lc(vals[0]) === 'false' ? 'fails' : 'passes'}` };
+          return { s: 'unknown', d: `device posture "${(pp && pp.name) || o.lhs}" ${lc(vals[0]) === 'false' ? 'fails' : 'passes'}`, posture: lc(vals[0]) !== 'false' };
         }
         if (t === 'TRUSTED_NETWORK') {
           const tn = arr(snap.zpaTrustedNetworks).find((x) => String(x.networkId || x.id) === String(o.lhs));
@@ -695,7 +695,13 @@ function zpaEvalRules(rules, z, snap = {}, ctx = {}) {
       const isApp = /^(APP|APP_GROUP)(\/(APP|APP_GROUP))?$/.test(types);
       const detail = isApp ? `${what} — ${here}${z.apps.length && z.apps[0].segmentGroupId ? ` (group "${sgName(z.apps[0].segmentGroupId) || z.apps[0].segmentGroupId}")` : ''}`
         : status === 'unknown' ? `${what} — depends on user/device context${idKnown ? ' not available from the lookup' : ' (enter a user)'}` : `${what} — ${status === 'match' ? 'user matches' : 'user does not match'}`;
-      crits.push({ field: types || 'condition', status, kind: /SCIM|SAML|IDP|USER/.test(types) ? 'identity' : /POSTURE|TRUSTED_NETWORK|PLATFORM|COUNTRY|RISK|CHROME/.test(types) ? 'device' : 'other', scope: types, detail });
+      // Posture-only condition: record which outcome it needs (true = posture passes), so both device cases can be evaluated.
+      let postureNeed;
+      if (results.length && results.every((x) => x.posture !== undefined) && new Set(results.map((x) => x.posture)).size === 1) {
+        postureNeed = results[0].posture;
+        if (c.negated === true || lc(c.negated) === 'true') postureNeed = !postureNeed;
+      }
+      crits.push({ postureNeed, field: types || 'condition', status, kind: /SCIM|SAML|IDP|USER/.test(types) ? 'identity' : /POSTURE|TRUSTED_NETWORK|PLATFORM|COUNTRY|RISK|CHROME/.test(types) ? 'device' : 'other', scope: types, detail });
     }
     const e = evalRule(r, crits);
     e.action = r.action;
@@ -766,15 +772,27 @@ function mZpa(snap, ctx) {
   else {
     out.verdict = 'BLOCK'; out.reason = 'Matched an application segment but no access rule allows it (ZPA default deny)';
     const maybe = out.couldOverride.filter((e) => !/DENY/.test(e.action || ''));
-    // First unresolved rule is an Allow whose only open conditions are about the device: report it as the outcome,
-    // conditional on the device (identity and app already match).
-    const first = out.couldOverride[0];
-    if (first && !/DENY/.test(first.action || '') && first.criteria.filter((c) => c.status === 'unknown').every((c) => c.kind === 'device')) {
-      const need = first.criteria.filter((c) => c.status === 'unknown').map((c) => c.detail.replace(/ — .*$/, ''));
-      out.decidingRule = first; out.verdict = 'ALLOW'; out.confidence = 'conditional';
-      out.reason = `Access rule "${first.name}" allows it if the ${need.join(' and ')}. Otherwise ZPA denies by default.`;
-      out.deviceConditional = need;
-      out.couldOverride = out.couldOverride.slice(1);
+    // Rules whose only open conditions are device posture: evaluate the access policy twice, with posture passing and
+    // failing, in rule order. If both cases resolve, report the posture-passing outcome and show the other.
+    const decide = (pass) => {
+      for (const e of evaluated) {
+        if (e.status === 'match') return { rule: e };
+        if (e.status !== 'unknown') continue;
+        const open = e.criteria.filter((c) => c.status === 'unknown');
+        if (!open.every((c) => c.postureNeed !== undefined)) return null; // depends on more than posture
+        if (open.every((c) => c.postureNeed === pass)) return { rule: e };
+      }
+      return { rule: null };
+    };
+    const ok = decide(true), bad = decide(false);
+    if (ok && bad && (ok.rule || bad.rule)) {
+      const act = (d) => (d.rule ? (/DENY/.test(d.rule.action || '') ? 'BLOCK' : 'ALLOW') : 'BLOCK');
+      const say = (d) => (d.rule ? `${act(d) === 'BLOCK' ? 'blocked' : 'allowed'} by "${d.rule.name}"` : 'blocked by ZPA default deny');
+      const postures = [...new Set(evaluated.filter((e) => e.status === 'unknown').flatMap((e) => e.criteria.filter((c) => c.postureNeed !== undefined).map((c) => c.detail.replace(/ (passes|fails)( —.*)?$/, ''))))];
+      out.decidingRule = ok.rule; out.verdict = act(ok); out.confidence = 'conditional';
+      out.reason = `With ${postures.join(' and ') || 'device posture'} passing: ${say(ok)}. If it fails: ${say(bad)}.`;
+      out.deviceConditional = { pass: { action: act(ok), rule: ok.rule && ok.rule.name, order: ok.rule && ok.rule.order }, fail: { action: act(bad), rule: bad.rule && bad.rule.name, order: bad.rule && bad.rule.order }, postures };
+      out.couldOverride = out.couldOverride.filter((e) => e !== ok.rule && e !== bad.rule);
       out.stages.push({ step: 'Access policy', status: 'unknown', detail: out.reason });
       return out;
     }
@@ -980,7 +998,7 @@ function summarize(modules, ctx = {}) {
       const unk = (r.criteria || []).filter((c) => c.status === 'unknown');
       alsoBasedOn.push({ kind: 'zpa', condition: unk.map(condLabel).join(' + ') || 'context not supplied', action: /BYPASS/i.test(r.action) ? 'BYPASS' : 'ALLOW', module: 'ZPA client forwarding policy', rule: r.name, order: r.order });
     }
-    if (zpa.deviceConditional) alsoBasedOn.unshift({ kind: 'zpa', condition: `Device check fails (needs: ${zpa.deviceConditional.join(' and ')})`, action: 'BLOCK', module: 'ZPA Access Policy', rule: null, detail: `Rule "${zpa.decidingRule.name}" then doesn't apply, and ZPA denies by default` });
+    if (zpa.deviceConditional) { const f = zpa.deviceConditional.fail; alsoBasedOn.unshift({ kind: 'zpa', condition: `If the ${zpa.deviceConditional.postures.join(' / ') || 'device posture'} check fails`, action: f.action, module: 'ZPA Access Policy', rule: f.rule, order: f.order, detail: f.rule ? null : 'No rule allows it, so ZPA denies by default' }); }
     if (zpa.onNet) alsoBasedOn.push({ kind: 'zpa', condition: `On a trusted (on-net) network: segment "${zpa.onNet.segment}" bypasses ZPA`, action: 'BYPASS', module: 'ZPA segment', rule: null, detail: 'Then it is handled as internet traffic (Client Connector / ZIA)' });
   } else {
     const pipeline = modules.filter((m) => !m.module.startsWith('Forwarding') && m.module !== 'ZPA Access Policy' && !['N/A'].includes(m.verdict));

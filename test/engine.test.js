@@ -458,8 +458,8 @@ test('ZPA: identity matches and only device posture is open → allow, condition
   const run = (groups) => simulate({ data }, { target: M.parseTarget('rad.zerotrusthospital.org'), port: 8042, protocol: 'tcp', categories: [], resolvedIps: [], groups, userResolved: { email: 'j@x' }, user: 'j@x', notes: [], useZpa: true, zpaScimNames: { 777: 'radiologists' } }, {});
   const yes = run(['Radiologists']);
   assert.equal(yes.summary.primary.action, 'ALLOW'); assert.equal(yes.modules[0].confidence, 'conditional');
-  assert.match(yes.modules[0].reason, /device posture "CrowdStrike ZTA" passes/);
-  assert.ok(yes.summary.alsoBasedOn.some((x) => /Device check fails/.test(x.condition) && x.action === "BLOCK"));
+  assert.match(yes.modules[0].reason, /With device posture "CrowdStrike ZTA" passing: allowed by "Radiologists Only". If it fails: blocked by ZPA default deny/);
+  assert.ok(yes.summary.alsoBasedOn.some((x) => /check fails/.test(x.condition) && x.action === "BLOCK"));
   assert.equal(run(['Nursing']).summary.primary.action, 'BLOCK');
 });
 
@@ -483,4 +483,22 @@ test('SCIM_GROUP is matched by ID from ZPA SCIM membership', () => {
   const ctx = (mem) => ({ target: M.parseTarget('pacs.hospital.example'), port: 104, protocol: 'tcp', categories: [], resolvedIps: [], groups: [], user: 'jp@x', userEmail: 'jp@x', notes: [], useZpa: true, zpaScimMember: mem });
   assert.equal(simulate({ data }, ctx({ 123: ['456'] }), {}).summary.primary.action, 'ALLOW');
   assert.equal(simulate({ data }, ctx({ 123: ['457'] }), {}).summary.primary.action, 'BLOCK');
+});
+
+test('ZPA: deny-on-failed-posture rule above allow-on-posture rule (ZTH Radiologists)', () => {
+  const { simulate } = require('../src/engine');
+  const data = JSON.parse(JSON.stringify(require('../src/demo-snapshot.json')));
+  data.zpaApps.push({ id: '8020', name: 'ZTH Radiology', domainNames: ['rad.zerotrusthospital.org'], segmentGroupId: '5060', tcpPortRanges: ['8042', '8042'] });
+  data.zpaPostureProfiles = [{ postureUdid: 'fp', name: 'Filepath Checking for a Folder' }];
+  const conds = (posture) => [{ operands: [{ objectType: 'APP', rhs: '8020' }] }, { operands: [{ objectType: 'SCIM_GROUP', idpId: '303', rhs: '2597036' }] }, { operands: [{ objectType: 'POSTURE', lhs: 'fp', rhs: posture }] }];
+  data.zpaAccessRules = [
+    { id: 'r5', name: 'Radiologist Failed Posture', action: 'DENY', ruleOrder: '5', conditions: conds('false') },
+    { id: 'r6', name: 'Radiologists Only', action: 'ALLOW', ruleOrder: '6', conditions: conds('true') }];
+  const run = (mem) => simulate({ data }, { target: M.parseTarget('rad.zerotrusthospital.org'), port: 8042, protocol: 'tcp', categories: [], resolvedIps: [], groups: [], user: 'jp@x', userEmail: 'jp@x', notes: [], useZpa: true, zpaScimMember: mem }, {});
+  const r = run({ 303: ['2597036'] });
+  assert.equal(r.summary.primary.action, 'ALLOW'); assert.equal(r.summary.primary.rule, 'Radiologists Only');
+  assert.match(r.modules[0].reason, /If it fails: blocked by "Radiologist Failed Posture"/);
+  const alt = r.summary.alsoBasedOn.find((x) => /check fails/.test(x.condition));
+  assert.equal(alt.action, 'BLOCK'); assert.equal(alt.rule, 'Radiologist Failed Posture');
+  assert.equal(run({ 303: ['999'] }).summary.primary.action, 'BLOCK'); // not a radiologist
 });
