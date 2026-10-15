@@ -628,6 +628,24 @@ function zpaMatch(snap, ctx) {
     candidates: full, partial: full.length ? partial : [], partialOnly: !full.length && partial.length > 0, skipped,
   };
 }
+// What a ZPA/Client Connector posture profile requires, in words, from its type and config.
+function postureRequirement(pp) {
+  if (!pp) return '';
+  let cfg = pp.postureConfig;
+  try { if (typeof cfg === 'string') cfg = JSON.parse(cfg); } catch {}
+  const t = String(pp.postureTypeValue || pp.postureType || '');
+  const c = cfg || {};
+  let req;
+  if (t === '2' || c.filePath) req = `file path ${c.filePath} exists`;
+  else if (t === '3' || c.registryKey) req = `registry key ${c.registryKey}${c.nameValue && c.nameValue.name ? ` has value ${c.nameValue.name} = ${c.nameValue.data}` : ' exists'}`;
+  else if (t === '5' || (c.status != null && /firewall/i.test(pp.name))) req = `firewall ${+c.status === 1 ? 'is on' : 'status ' + c.status}`;
+  else if (t === '13' || c.ownership) req = `device ownership is ${c.ownership}`;
+  else if (t === '17' || (Array.isArray(c) && c[0] && c[0].osVersion)) req = `OS version ${arr(c).map((x) => `${x.osVersion}${x.buildNumber ? ' build ' + x.buildNumber : ''}`).join(' or ')} or later`;
+  else req = typeof cfg === 'object' && cfg ? Object.entries(Array.isArray(cfg) ? cfg[0] || {} : cfg).filter(([, v]) => v !== '' && v != null).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(', ') : String(cfg || '');
+  const plat = arr(pp.platformType).map((x) => ({ WINDOWS: 'Windows', MAC: 'macOS', MACOS: 'macOS', LINUX: 'Linux', IOS: 'iOS', ANDROID: 'Android' }[x] || x)).join(', ');
+  return req + (plat ? ` (${plat})` : '');
+}
+
 // ZPA operand evaluation shared by access and client forwarding policy: app / segment group are known, the rest
 // (SCIM, SAML, posture, client type, trusted network…) depends on user and device context.
 function zpaEvalRules(rules, z, snap = {}, ctx = {}) {
@@ -673,7 +691,7 @@ function zpaEvalRules(rules, z, snap = {}, ctx = {}) {
         }
         if (t === 'POSTURE') {
           const pp = arr(snap.zpaPostureProfiles).find((x) => String(x.postureUdid || x.id) === String(o.lhs));
-          return { s: 'unknown', d: `device posture "${(pp && pp.name) || o.lhs}" ${lc(vals[0]) === 'false' ? 'fails' : 'passes'}`, posture: lc(vals[0]) !== 'false' };
+          return { s: 'unknown', d: `device posture "${(pp && pp.name) || o.lhs}" ${lc(vals[0]) === 'false' ? 'fails' : 'passes'}`, posture: lc(vals[0]) !== 'false', postureInfo: { name: (pp && pp.name) || o.lhs, requirement: postureRequirement(pp) } };
         }
         if (t === 'TRUSTED_NETWORK') {
           const tn = arr(snap.zpaTrustedNetworks).find((x) => String(x.networkId || x.id) === String(o.lhs));
@@ -701,7 +719,8 @@ function zpaEvalRules(rules, z, snap = {}, ctx = {}) {
         postureNeed = results[0].posture;
         if (c.negated === true || lc(c.negated) === 'true') postureNeed = !postureNeed;
       }
-      crits.push({ postureNeed, field: types || 'condition', status, kind: /SCIM|SAML|IDP|USER/.test(types) ? 'identity' : /POSTURE|TRUSTED_NETWORK|PLATFORM|COUNTRY|RISK|CHROME/.test(types) ? 'device' : 'other', scope: types, detail });
+      const postureInfo = results.map((x) => x.postureInfo).filter(Boolean);
+      crits.push({ matched: status === 'match' ? results.filter((x) => x.s === 'match').map((x) => x.d) : undefined, postureNeed, postureInfo: postureInfo.length ? postureInfo : undefined, field: types || 'condition', status, kind: /SCIM|SAML|IDP|USER/.test(types) ? 'identity' : /POSTURE|TRUSTED_NETWORK|PLATFORM|COUNTRY|RISK|CHROME/.test(types) ? 'device' : 'other', scope: types, detail });
     }
     const e = evalRule(r, crits);
     e.action = r.action;
@@ -791,7 +810,9 @@ function mZpa(snap, ctx) {
       const postures = [...new Set(evaluated.filter((e) => e.status === 'unknown').flatMap((e) => e.criteria.filter((c) => c.postureNeed !== undefined).map((c) => c.detail.replace(/ (passes|fails)( —.*)?$/, ''))))];
       out.decidingRule = ok.rule; out.verdict = act(ok); out.confidence = 'conditional';
       out.reason = `With ${postures.join(' and ') || 'device posture'} passing: ${say(ok)}. If it fails: ${say(bad)}.`;
-      out.deviceConditional = { pass: { action: act(ok), rule: ok.rule && ok.rule.name, order: ok.rule && ok.rule.order }, fail: { action: act(bad), rule: bad.rule && bad.rule.name, order: bad.rule && bad.rule.order }, postures };
+      const seen = new Map();
+      for (const e of evaluated.filter((e2) => e2.status === 'unknown')) for (const c of e.criteria) for (const pi of c.postureInfo || []) seen.set(pi.name, pi);
+      out.deviceConditional = { profiles: [...seen.values()], pass: { action: act(ok), rule: ok.rule && ok.rule.name, order: ok.rule && ok.rule.order }, fail: { action: act(bad), rule: bad.rule && bad.rule.name, order: bad.rule && bad.rule.order }, postures };
       out.couldOverride = out.couldOverride.filter((e) => e !== ok.rule && e !== bad.rule);
       out.stages.push({ step: 'Access policy', status: 'unknown', detail: out.reason });
       return out;

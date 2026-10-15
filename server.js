@@ -216,7 +216,7 @@ async function buildContext(s, b) {
       for (const x of res || []) for (const g of x.groups || []) { s.scimNames = s.scimNames || new Map(); s.scimNames.set(g.id, g.name); }
       const found = (res || []).filter((x) => x.groups && x.groups.length);
       if (found.length) ctx.notes.push(`ZPA SCIM: ${found.map((x) => `${x.idp}: ${x.groups.length} group${x.groups.length === 1 ? '' : 's'} (${x.groups.slice(0, 6).map((g) => g.name).join(', ')}${x.groups.length > 6 ? ', …' : ''})`).join('; ')}.`);
-      else ctx.notes.push(`ZPA SCIM: no group membership found for ${names[0]}${(res || []).filter((x) => x.note).map((x) => ` (${x.idp}: ${x.note})`).join('')}.`);
+      else ctx.notes.push(`ZPA SCIM: no group membership found for ${names[0]}${(res || []).filter((x) => x.note).map((x) => ` (${x.idp}: ${/not\.found|No scim user/i.test(x.note) ? 'not provisioned' : x.note.slice(0, 80)})`).join('')}.`);
     }
   }
   // ZPA access rules reference SCIM groups by ID: resolve the names once per session so a user's groups can be matched.

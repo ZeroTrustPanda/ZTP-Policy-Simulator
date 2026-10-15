@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.4 — 2026-10-15
+- Result tile trimmed: action, rule, destination, Matched on (matching operand only), category only for ZIA; notes collapsed.
+- Posture caution box with each profile's requirement from postureConfig and the fail-case outcome.
+
 ## 1.6.3 — 2026-10-15
 - ZPA: posture-only open conditions evaluated as pass/fail scenarios in rule order (handles deny-if-fails above allow-if-passes); verified on a live ZTH snapshot.
 

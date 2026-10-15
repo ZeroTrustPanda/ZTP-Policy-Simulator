@@ -206,6 +206,13 @@ table.cmp tr.diff td:first-child { box-shadow: inset 3px 0 0 #f59e0b; }
 .who-box input { flex: 1; min-width: 200px; border: none !important; background: transparent !important; padding: 4px !important; box-shadow: none !important; outline: none; }
 .who-tag { font-size: 10px; font-weight: 700; letter-spacing: .04em; opacity: .7; }
 .dir-results div.act { background: var(--bg-card-hover); }
+.tile .matched { font-size: 13px; color: var(--text-secondary); margin-top: 8px; }
+.tile .matched b { color: var(--text-primary); font-weight: 600; }
+.posture { margin-top: 12px; padding: 10px 12px; border-radius: var(--radius); background: rgba(245, 158, 11, .10); border: 1px solid rgba(245, 158, 11, .45); font-size: 13px; }
+.posture .ph { font-weight: 700; color: #fcd34d; margin-bottom: 4px; }
+.posture ul { margin: 4px 0 6px 18px; padding: 0; } .posture li { margin: 2px 0; }
+.posture .pf { margin-top: 4px; } .posture .pn { margin-top: 4px; font-size: 12px; opacity: .75; }
+.lk-details summary { font-size: 12px; }
 .dir-results { border: 1px solid var(--border); border-radius: var(--radius); max-height: 180px; overflow-y: auto; margin-top: 6px; background: var(--bg-secondary); }
 .dir-results div { padding: 6px 10px; font-size: 13px; cursor: pointer; } .dir-results div:hover { background: var(--bg-card-hover); }
 .plan-step { border-left: 3px solid var(--accent-blue); padding: 6px 10px; margin: 8px 0; background: var(--bg-secondary); border-radius: 0 var(--radius) var(--radius) 0; font-size: 13px; }
@@ -690,25 +697,56 @@ function ruleBox(r, tag) {
 const ACT = { BLOCK: ['⛔', 'BLOCK', 'b-red'], ALLOW: ['✅', 'ALLOW', 'b-green'], BYPASS: ['↪', 'BYPASS', 'b-slate'], ISOLATE: ['🧪', 'ISOLATE', 'b-cyan'], CAUTION: ['⚠️', 'CAUTION', 'b-amber'] };
 const KIND_ICON = { identity: '👥', location: '📍', other: '⏱', zcc: '💻', content: '📄', input: '✏️', zia: '🌐', zpa: '🔒' };
 function actBadge(a) { const x = ACT[a] || ['•', a, 'b-slate']; return `<span class="badge ${x[2]}">${x[0]} ${esc(x[1])}</span>`; }
+// What the deciding rule matched on for this user/group, in a few words.
+function matchedOn(p, modules) {
+  const m = modules.find((x) => x.module === p.module);
+  const r = m && m.decidingRule;
+  if (!r) return '';
+  const out = [];
+  for (const cr of r.criteria || []) {
+    if (cr.status !== 'match') continue;
+    if (!(cr.kind === 'identity' || cr.field === 'user/group/department')) continue;
+    for (let d of cr.matched || [String(cr.detail || '').replace(/ — .*$/, '')]) {
+      d = d.replace(/ \(ZPA SCIM membership\)/, '');
+      const attr = d.match(/^(?:SCIM|SAML) attribute .*?= (.+)$/);
+      out.push(attr ? `user ${attr[1]}` : d);
+    }
+  }
+  return out.join(' · ');
+}
+function postureBox(modules) {
+  const z = modules.find((x) => x.module === 'ZPA Access Policy');
+  const dc = z && z.deviceConditional;
+  if (!dc) return '';
+  const prof = (dc.profiles || []).map((p) => `<li><b>${esc(p.name)}</b>${p.requirement ? ` — ${esc(p.requirement)}` : ''}</li>`).join('');
+  const fail = dc.fail.rule ? `${actBadge(dc.fail.action)} by <b>${esc(dc.fail.rule)}</b>` : `${actBadge('BLOCK')} (ZPA default deny)`;
+  return `<div class="posture"><div class="ph">⚠️ Caution — device posture required</div>
+    <ul>${prof || '<li>Posture profile</li>'}</ul>
+    <div class="pf">Must pass for this result. If it fails: ${fail}</div>
+    <div class="pn">Posture is checked by Client Connector on the device, so the simulator can't verify it.</div></div>`;
+}
 function actionTile(s, c, modules) {
   const p = s.primary, [ico, word] = ACT[p.action] || ['•', p.action];
-  const ctx = [c.target ? (c.target.raw || c.target.host) : 'any destination', c.port != null ? (c.protocol || 'tcp').toUpperCase() + '/' + c.port : '', (c.categories || []).length ? 'category: ' + c.categories.join(', ') + (c.categorySource === 'Zscaler lookup' ? ' (Zscaler lookup)' : '') : '', (c.resolvedIps || []).slice(0, 2).join(', '), (c.groups || []).length ? 'groups: ' + c.groups.join(', ') : ''].filter(Boolean).map(esc).join(' · ');
+  const zpaDecided = p.module === 'ZPA Access Policy';
+  const cat = !zpaDecided && (c.categories || []).length ? c.categories.join(', ') : '';
+  const meta = [c.target ? (c.target.raw || c.target.host) : 'any destination', c.port != null ? (c.protocol || 'tcp').toUpperCase() + '/' + c.port : '', cat].filter(Boolean).map(esc).join(' · ');
   const tags = (p.tags || []).map((t) => `<span class="badge ${t.tag === 'NOT_INSPECTED' ? 'b-amber' : 'b-blue'}" title="${esc(t.text)}">${t.tag === 'NOT_INSPECTED' ? '🔓 Not inspected' : '🔍 Inspect only'}</span>`).join('');
-  const tagText = (p.tags || []).map((t) => `<div class="form-hint">${esc(t.text)}</div>`).join('');
+  const on = matchedOn(p, modules);
+  const notes = [...(c.notes || []), ...s.lines.filter((l) => /assumed/i.test(l))];
+  const details = notes.length ? `<details class="lk-details"><summary>Lookup details (${notes.length})</summary>${notes.map((n) => `<div class="form-hint" style="margin-top:4px">${esc(n)}</div>`).join('')}</details>` : '';
   const why = (p.criteria || []).length ? `<details><summary>Why this rule matched</summary>${crits(p.criteria)}</details>` : '';
-  const allowed = p.action === 'ALLOW' && (s.allowedBy || []).length ? `<details><summary>Rule that decided in each module</summary><table style="margin-top:6px">${s.allowedBy.map((a) => `<tr><td>${esc(a.module)}</td><td>${a.rule ? esc(a.rule) : `<span class="form-hint">default</span>`}</td><td>${badgeFor(a.action)}</td></tr>`).join('')}</table></details>` : '';
-  const notes = [...(c.notes || []), ...s.lines.filter((l) => /assumed/i.test(l))].map((n) => `<div class="note">${esc(n)}</div>`).join('');
   return `<div class="tile ${esc(p.action)}"><div class="t-title">Policy rule action</div>
     <div class="act"><span class="ico">${ico}</span>${esc(word)}</div>
     <div class="mod-name">${esc(p.module)}</div>
     <div class="rule-name">${p.rule ? esc(p.rule) : `<span class="empty">${esc(p.reason || 'no rule matched — default action')}</span>`}${p.order != null && p.order >= 0 ? ` <span class="badge b-slate" style="vertical-align:3px">order ${esc(p.order)}</span>` : ''}</div>
-    ${tags ? `<div class="tags">${tags}</div>${tagText}` : ''}
-    <div class="ctx">${ctx}</div>
-    ${notes ? `<div class="notes">${notes}</div>` : ''}
-    ${why}${allowed}</div>`;
+    ${tags ? `<div class="tags">${tags}</div>` : ''}
+    <div class="ctx">${meta}</div>
+    ${on ? `<div class="matched">Matched on: <b>${esc(on)}</b></div>` : ''}
+    ${postureBox(modules)}
+    ${why}${details}</div>`;
 }
 function basedOnTile(s, c) {
-  const conds = s.alsoBasedOn || [];
+  const conds = (s.alsoBasedOn || []).filter((x) => !(x.kind === 'zpa' && /check fails/.test(x.condition))); // shown in the posture box
   const row = (x) => `<div class="cond"><span class="ci">${KIND_ICON[x.kind] || '•'}</span><div><div class="ct">${esc(x.condition)}</div><div class="cr">${x.rule ? `rule "${esc(x.rule)}"${x.order != null && x.order >= 0 ? ' · order ' + esc(x.order) : ''} · ${esc(x.module)}` : esc(x.detail || x.module || '')}</div></div><div class="ca">→ ${actBadge(x.action)}</div></div>`;
   const noUser = !(c.user || (c.groups || []).length);
   const body = conds.length

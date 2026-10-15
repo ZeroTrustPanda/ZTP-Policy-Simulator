@@ -1,4 +1,4 @@
-# ZeroTrustPanda ZS Policy Simulator v1.6.3
+# ZeroTrustPanda ZS Policy Simulator v1.6.4
 
 **Would this be allowed, blocked or bypassed — and by what?** A standalone simulator that pulls your live Zscaler policy over OneAPI and evaluates a transaction across ZIA, ZPA and Client Connector the way the cloud would, in rule order, then shows the deciding rule and everything else that could change the outcome.
 
@@ -7,12 +7,12 @@ Companion to the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustP
 ## Downloads
 | Platform | File |
 |---|---|
-| Windows x64 | [ZTP-Policy-Simulator-1.6.3-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.3/ZTP-Policy-Simulator-1.6.3-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
-| macOS Apple Silicon | [ZTP-Policy-Simulator-1.6.3-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.3/ZTP-Policy-Simulator-1.6.3-macos-arm64.zip) |
-| macOS Intel | [ZTP-Policy-Simulator-1.6.3-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.3/ZTP-Policy-Simulator-1.6.3-macos-x64.zip) |
+| Windows x64 | [ZTP-Policy-Simulator-1.6.4-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.4/ZTP-Policy-Simulator-1.6.4-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
+| macOS Apple Silicon | [ZTP-Policy-Simulator-1.6.4-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.4/ZTP-Policy-Simulator-1.6.4-macos-arm64.zip) |
+| macOS Intel | [ZTP-Policy-Simulator-1.6.4-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.4/ZTP-Policy-Simulator-1.6.4-macos-x64.zip) |
 | Source | clone the repo, or GitHub's "Source code" download on the release |
 
-Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.3/SHA256SUMS.txt)
+Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.4/SHA256SUMS.txt)
 
 No install, no Node.js required. Run it and it opens `http://127.0.0.1:8787`.
 macOS builds are unsigned — before first run: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`.
@@ -109,6 +109,15 @@ Port from the URL scheme (hostnames assume HTTPS/443) · network service and app
 - Zscaler offers no "evaluate this transaction" API, so evaluation is re-implemented from rule data. Time windows, user agent, device trust, risk score and source-port bypasses are flagged as unknown rather than evaluated.
 - No per-transaction log lookup: the console's transaction-log endpoints refuse API-client tokens. Use the console's Web / Firewall Insights logs for per-transaction proof.
 - ZCC field names follow the shapes verified by the Policy Wizard; report any app profile that shows "no forwarding profile linked".
+
+## Changes in 1.6.4
+- **Cleaner result tile.** It shows:
+  - the action, plus the deciding rule and its order;
+  - the destination and port;
+  - one *Matched on* line naming the group or user that matched, for example `SCIM group "radiologists"` or `user jane@acme.org`.
+- The URL category shows only when ZIA decides, not for ZPA application segments.
+- **⚠️ Device posture caution.** When ZPA access depends on posture, the tile names each posture profile and what it requires, read from the ZPA posture profile (for example "file path C:\test exists (Windows)", "OS version 11.0 build 22000 or later", "device ownership is corporate"). It also shows what happens if posture fails. The simulator can't check posture itself.
+- Lookup notes (DNS, directory and SCIM results) are collapsed under *Lookup details*.
 
 ## Changes in 1.6.3
 - **ZPA posture rules evaluated both ways.** When the user and app match but a rule depends only on device posture, the access policy is evaluated in rule order twice: once with posture passing and once with it failing. The result shows the passing case, and *Policy action also based on* shows the failing case. For example: allowed by "Radiologists Only"; if the check fails, blocked by "Radiologist Failed Posture".
