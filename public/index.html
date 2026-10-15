@@ -190,6 +190,16 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 12
 .radio-row label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
 .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px 3px 10px; border-radius: 14px; background: var(--accent-blue-dim); color: #bfdbfe; font-size: 12px; margin: 0 6px 6px 0; }
 .pill button { background: none; border: none; color: inherit; cursor: pointer; font-size: 14px; line-height: 1; padding: 0; }
+.cmp-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.25rem; margin-bottom: 1.25rem; }
+.cmp-cols .tile { height: 100%; }
+.cmp-head { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.cmp-verdict { font-size: 14px; line-height: 1.55; }
+.cmp-verdict b { color: var(--text-primary); }
+table.cmp td { vertical-align: top; }
+table.cmp tr.diff td { background: rgba(245, 158, 11, .10); }
+table.cmp tr.diff td .form-hint { color: var(--text-secondary); }
+table.cmp tr.diff td:first-child { box-shadow: inset 3px 0 0 #f59e0b; }
+@media (max-width: 1000px) { .cmp-cols { grid-template-columns: 1fr; } }
 .dir-results { border: 1px solid var(--border); border-radius: var(--radius); max-height: 180px; overflow-y: auto; margin-top: 6px; background: var(--bg-secondary); }
 .dir-results div { padding: 6px 10px; font-size: 13px; cursor: pointer; } .dir-results div:hover { background: var(--bg-card-hover); }
 .plan-step { border-left: 3px solid var(--accent-blue); padding: 6px 10px; margin: 8px 0; background: var(--bg-secondary); border-radius: 0 var(--radius) var(--radius) 0; font-size: 13px; }
@@ -311,9 +321,15 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
           </div>
           <div class="opt" id="secWho"><div class="grid">
             <div><label class="form-label">User (name or email)</label><input type="text" id="user"></div>
-            <div><label class="form-label">Groups (looked up from ZIA if blank)</label><input type="text" id="groups" placeholder="comma-separated"></div>
+            <div><label class="form-label">Groups (looked up from ZIA / ZIdentity if blank)</label><input type="text" id="groups" placeholder="comma-separated"></div>
             <div><label class="form-label">Department</label><input type="text" id="department"></div>
             <div><label class="form-label">Location</label><input type="text" id="location" list="locList"><datalist id="locList"></datalist></div>
+          </div>
+          <div style="margin-top:14px">
+            <label class="form-label">Compare as — pick up to 2 users or groups</label>
+            <div id="cmpPills"></div>
+            <div style="max-width:620px"><input type="text" id="cmpQ" placeholder="Search users and groups (ZIdentity, ZIA, ZPA SCIM)…" autocomplete="off"><div class="dir-results hidden" id="cmpRes"></div></div>
+            <div class="form-hint" style="margin-top:6px">With picks, the transaction runs once per pick and the results show side by side. User, Groups and Department above are ignored while comparing; Location still applies.</div>
           </div></div>
           <div class="opt" id="secWeb"><div class="grid">
             <div><label class="form-label">File type extension</label><input type="text" id="fileType" placeholder="e.g. exe, docx, zip"></div>
@@ -725,11 +741,82 @@ function modulesCard(modules, s) {
   }).join('');
   return `<div class="card"><div class="card-header"><h3>Every module</h3><p style="font-size:13px">Click a module for its rules.</p></div>${items}</div>`;
 }
+// ---------- compare as (up to two users or groups) ----------
+let cmpPicks = [], cmpRes = [], cmpTimer = null;
+function renderCmp() {
+  $('cmpPills').innerHTML = cmpPicks.map((p, i) => `<span class="pill">${p.kind === 'user' ? '👤' : '👥'} ${esc(p.name)}${p.email && p.email !== p.name ? ` <span style="opacity:.75">${esc(p.email)}</span>` : ''}<button data-i="${i}" title="Remove">×</button></span>`).join('');
+  $('cmpQ').disabled = cmpPicks.length >= 2;
+  $('cmpQ').placeholder = cmpPicks.length >= 2 ? 'Two picks selected — remove one to change' : 'Search users and groups (ZIdentity, ZIA, ZPA SCIM)…';
+  $('btnSim').textContent = cmpPicks.length === 2 ? 'Compare' : cmpPicks.length ? 'Simulate as pick' : 'Simulate';
+}
+$('cmpPills').addEventListener('click', (e) => { const b = e.target.closest('button[data-i]'); if (!b) return; cmpPicks.splice(+b.dataset.i, 1); renderCmp(); });
+$('cmpQ').addEventListener('input', () => {
+  clearTimeout(cmpTimer);
+  const q = $('cmpQ').value.trim();
+  if (q.length < 2) { $('cmpRes').classList.add('hidden'); return; }
+  cmpTimer = setTimeout(async () => {
+    $('cmpRes').innerHTML = '<div class="form-hint"><span class="spinner"></span> Searching…</div>'; $('cmpRes').classList.remove('hidden');
+    try {
+      const j = await api('/api/identities', { q });
+      if ($('cmpQ').value.trim() !== q) return;
+      cmpRes = j.results || [];
+      $('cmpRes').innerHTML = (cmpRes.length ? cmpRes.map((x, i) => `<div data-i="${i}">${x.kind === 'user' ? '👤' : '👥'} ${esc(x.name)}${x.email && x.email !== x.name ? ` <span class="form-hint">${esc(x.email)}</span>` : ''} <span class="badge b-slate" style="float:right">${esc(x.source)}</span></div>`).join('') : '<div class="form-hint">No matches</div>')
+        + ((j.failed || []).length ? `<div class="form-hint" style="cursor:default">Not searched: ${esc(j.failed.join('; '))}</div>` : '');
+    } catch (e) { $('cmpRes').innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+  }, 300);
+});
+$('cmpQ').addEventListener('blur', () => setTimeout(() => $('cmpRes').classList.add('hidden'), 150));
+$('cmpRes').addEventListener('mousedown', (e) => {
+  const d = e.target.closest('div[data-i]'); if (!d) return;
+  const x = cmpRes[+d.dataset.i];
+  if (x && cmpPicks.length < 2 && !cmpPicks.some((p) => p.kind === x.kind && p.name === x.name && p.email === x.email)) cmpPicks.push(x);
+  $('cmpQ').value = ''; $('cmpRes').classList.add('hidden'); renderCmp();
+});
+const pickLabel = (p) => (p.kind === 'user' ? `${p.name}${p.email && p.email !== p.name ? ` (${p.email})` : ''}` : `group ${p.name}`);
+function compareView(j) {
+  const runs = j.compare;
+  const head = (r) => `<div class="cmp-head">${r.pick.kind === 'user' ? '👤' : '👥'} ${esc(pickLabel(r.pick))} <span class="badge b-slate">${esc(r.pick.source || '')}</span></div>`;
+  const desc = (r) => { const p = r.summary.primary; return `<b>${esc(pickLabel(r.pick))}</b>: ${esc(p.action)} by ${esc(p.module)}${p.rule ? ` rule "${esc(p.rule)}"` : ` (${esc(p.reason || 'default')})`}`; };
+  if (runs.length === 1) {
+    const r = runs[0];
+    return `<div class="card"><div class="cmp-verdict">Simulated as ${desc(r)}.</div></div><div class="tiles">${actionTile(r.summary, r.context, r.modules)}${basedOnTile(r.summary, r.context)}</div>`
+      + forwardingCard(r.modules.find((m) => m.module.startsWith('Forwarding')), r.summary) + modulesCard(r.modules, r.summary);
+  }
+  const [A, B] = runs, pa = A.summary.primary, pb = B.summary.primary;
+  const names = [...new Set([...A.modules, ...B.modules].map((m) => m.module))];
+  const cell = (m) => (m ? `${badgeFor(m.verdict)}<div class="form-hint" style="margin-top:4px">${esc(m.decidingRule ? `rule "${m.decidingRule.name}"${m.decidingRule.order != null && m.decidingRule.order >= 0 ? ' · order ' + m.decidingRule.order : ''}` : m.reason || '')}</div>` : '<span class="form-hint">—</span>');
+  let diffs = 0;
+  const rows = names.map((n) => {
+    const a = A.modules.find((m) => m.module === n), b = B.modules.find((m) => m.module === n);
+    const key = (m) => (m ? `${m.verdict}|${m.decidingRule ? m.decidingRule.name : ''}` : '');
+    const d = key(a) !== key(b); if (d) diffs++;
+    return `<tr class="${d ? 'diff' : ''}"><td><b>${esc(n)}</b></td><td>${cell(a)}</td><td>${cell(b)}</td></tr>`;
+  }).join('');
+  const verdict = pa.action !== pb.action
+    ? `<b>Different results.</b> ${desc(A)}. ${desc(B)}.`
+    : pa.module !== pb.module || pa.rule !== pb.rule
+      ? `<b>Both ${esc(pa.action)}, by different rules.</b> ${desc(A)}. ${desc(B)}.`
+      : `<b>Same result for both:</b> ${esc(pa.action)} by ${esc(pa.module)}${pa.rule ? ` rule "${esc(pa.rule)}"` : ''}.`;
+  const full = (r) => `<details style="margin-top:10px"><summary>Full detail — ${esc(pickLabel(r.pick))}</summary><div style="margin-top:10px"><div class="tiles" style="grid-template-columns:1fr">${basedOnTile(r.summary, r.context)}</div>${forwardingCard(r.modules.find((m) => m.module.startsWith('Forwarding')), r.summary)}${modulesCard(r.modules, r.summary)}</div></details>`;
+  return `<div class="card"><div class="card-header"><h3>⚖️ Comparison</h3></div><div class="cmp-verdict">${verdict}</div>${diffs ? `<div class="form-hint" style="margin-top:6px">${diffs} module${diffs === 1 ? ' differs' : 's differ'} (highlighted below).</div>` : ''}</div>
+    <div class="cmp-cols"><div>${head(A)}${actionTile(A.summary, A.context, A.modules)}</div><div>${head(B)}${actionTile(B.summary, B.context, B.modules)}</div></div>
+    <div class="card"><div class="card-header"><h3>Module by module</h3><p style="font-size:13px">Verdict and deciding rule in each module for each pick. Rows that differ are highlighted.</p></div>
+    <table class="cmp"><tr><th style="width:24%">Module</th><th>${head(A)}</th><th>${head(B)}</th></tr>${rows}</table>${full(A)}${full(B)}</div>`;
+}
+
 $('btnSim').onclick = async () => {
   if (!sid || !loaded) { msg('simMsg', 'Connect and load policies first.'); return; }
   $('btnSim').disabled = true; $('simMsg').innerHTML = '<span class="spinner"></span> Evaluating…';
   try {
     const body = formBody();
+    if (cmpPicks.length && vis('cmpQ')) {
+      body.compare = cmpPicks;
+      const j = await api('/api/simulate', body);
+      lastSim = { body, result: j.compare[0] };
+      const errs = Object.keys((j.snapshot && j.snapshot.errors) || {});
+      $('simOut').innerHTML = (errs.length ? `<div class="note" style="margin-bottom:10px">Not evaluated (failed to load): ${errs.map(esc).join(', ')}</div>` : '') + compareView(j);
+      $('simMsg').textContent = ''; $('btnSim').disabled = false; return;
+    }
     const j = await api('/api/simulate', body);
     lastSim = { body, result: j };
     const s = j.summary, c = j.context;
@@ -1144,7 +1231,7 @@ async function dirSearch() {
     if (type === 'locations') res = CHG.ctx.locations.filter((l) => !q || l.name.toLowerCase().includes(q.toLowerCase())).slice(0, 50);
     else res = (await api('/api/directory', { type, q })).results;
   } catch (e) { res = []; $('chgDirRes').innerHTML = `<div class="err">${esc(e.message)}</div>`; $('chgDirRes').classList.remove('hidden'); return; }
-  $('chgDirRes').innerHTML = res.length ? res.map((x) => `<div data-id="${esc(x.id)}" data-name="${esc(x.name)}">${esc(x.name)}${x.email && x.email !== x.name ? ` <span class="form-hint">${esc(x.email)}</span>` : ''}</div>`).join('') : `<div class="form-hint">${q ? 'No matches' : 'Type to search'}</div>`;
+  $('chgDirRes').innerHTML = res.length ? res.map((x) => x.id == null ? `<div style="cursor:default;opacity:.6" title="${esc(x.note || '')}">${esc(x.name)} <span class="form-hint">${esc(x.note || 'not selectable')}</span></div>` : `<div data-id="${esc(x.id)}" data-name="${esc(x.name)}">${esc(x.name)}${x.email && x.email !== x.name ? ` <span class="form-hint">${esc(x.email)}</span>` : ''}</div>`).join('') : `<div class="form-hint">${q ? 'No matches' : 'Type to search'}</div>`;
   $('chgDirRes').classList.remove('hidden');
 }
 $('chgDirRes').addEventListener('mousedown', (e) => {

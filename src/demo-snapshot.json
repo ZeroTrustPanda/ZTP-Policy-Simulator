@@ -665,5 +665,43 @@
     "DENY_AI_ML_UPLOAD"
    ]
   }
+ ],
+ "demoUsers": [
+  {
+   "id": "d1",
+   "name": "Dr. Dana Lee",
+   "email": "dana.lee@hospital.example",
+   "groups": [
+    "Radiologists"
+   ],
+   "department": "Radiology"
+  },
+  {
+   "id": "d2",
+   "name": "Sam Kim",
+   "email": "sam.kim@hospital.example",
+   "groups": [
+    "Nursing"
+   ],
+   "department": "Nursing"
+  },
+  {
+   "id": "d3",
+   "name": "Alex Ortiz",
+   "email": "alex.ortiz@hospital.example",
+   "groups": [
+    "IT Admins"
+   ],
+   "department": "IT"
+  },
+  {
+   "id": "d4",
+   "name": "Guest Kiosk",
+   "email": "kiosk@hospital.example",
+   "groups": [
+    "Guests"
+   ],
+   "department": "Facilities"
+  }
  ]
 }

@@ -174,6 +174,16 @@ async function buildContext(s, b) {
   }
   // Accept pasted text like "288261371856945305 = jane@acme.org": use the email in it.
   if (b.user) { const em = String(b.user).match(/[^\s=<>"',;()]+@[^\s=<>"',;()]+\.[a-z]{2,}/i); ctx.userEmail = em ? em[0].toLowerCase() : null; if (em && em[0] !== String(b.user).trim()) { ctx.user = em[0]; b = Object.assign({}, b, { user: em[0] }); } }
+  if (s.demo && s.snap && s.snap.data) {
+    const dd = s.snap.data;
+    ctx.zpaScimNames = Object.fromEntries(Object.values(dd.zpaScimGroups || {}).flat().map((g) => [String(g.id), g.name]));
+    const q = String(b.user || '').toLowerCase();
+    const u = q && (dd.demoUsers || []).find((x) => [x.email, x.name].some((v) => String(v).toLowerCase() === q));
+    if (u && !(b.groups && b.groups.length)) {
+      ctx.groups = u.groups; ctx.department = ctx.department || u.department; ctx.userResolved = Object.assign({ source: 'sample directory' }, u);
+      ctx.notes.push(`User ${u.email} found in the sample directory: ${u.groups.join(', ')}.`);
+    }
+  }
   if (b.user && !s.demo && s.client && !(b.groups && b.groups.length)) {
     s.userCache = s.userCache || new Map();
     try {
@@ -219,6 +229,21 @@ app.post('/api/simulate', wrap(async (req, res) => {
   if (!s.snap) return res.status(409).json({ error: 'Policies are not loaded yet. Click "Load policies" first.' });
   const b = req.body;
   if (!b.target && !b.ip && !b.port && !b.networkService && !b.application && !b.fileType) return res.status(400).json({ error: 'Enter at least a destination, port, network service, application or file type.' });
+  // Compare mode: the same transaction as up to two identities (each a user or a group).
+  if (Array.isArray(b.compare) && b.compare.length) {
+    const picks = b.compare.slice(0, 2);
+    const runs = [];
+    for (const pk of picks) {
+      const b2 = Object.assign({}, b, { compare: undefined, department: '' });
+      if (pk.kind === 'group') Object.assign(b2, { user: '', groups: [String(pk.name)] });
+      else Object.assign(b2, { user: String(pk.email || pk.name || ''), groups: [] });
+      const ctx = await buildContext(s, b2);
+      if (pk.kind === 'group') ctx.notes.unshift(`Simulated as a member of group "${pk.name}"${pk.source ? ` (${pk.source})` : ''} only, with no user-specific attributes.`);
+      const out = simulate(s.snap, ctx, b.manual || {});
+      runs.push(Object.assign({ pick: pk }, out));
+    }
+    return res.json({ compare: runs, snapshot: { loadedAt: s.snap.loadedAt, errors: s.snap.errors, counts: counts(s.snap) } });
+  }
   const ctx = await buildContext(s, b);
   const out = simulate(s.snap, ctx, b.manual || {});
   out.snapshot = { loadedAt: s.snap.loadedAt, errors: s.snap.errors, counts: counts(s.snap) };
@@ -354,6 +379,41 @@ app.post('/api/changes/context', (req, res) => {
 });
 
 // Directory search for rule criteria (groups, departments, users).
+// Identity search for the "Compare as" pickers: users and groups from ZIdentity, ZIA and ZPA SCIM, labelled by source.
+app.post('/api/identities', wrap(async (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  const q = String((req.body && req.body.q) || '').trim();
+  if (q.length < 2) return res.json({ results: [] });
+  const ql = q.toLowerCase(), out = [], failed = [];
+  const add = (x) => { if (!out.some((y) => y.kind === x.kind && lc2(y.name) === lc2(x.name) && lc2(y.email) === lc2(x.email))) out.push(x); else { const y = out.find((y2) => y2.kind === x.kind && lc2(y2.name) === lc2(x.name) && lc2(y2.email) === lc2(x.email)); if (!y.source.includes(x.source)) y.source += ' · ' + x.source; } };
+  const d = (s.snap && s.snap.data) || {};
+  if (s.demo || !s.client) {
+    for (const u of d.demoUsers || []) if ((u.name + ' ' + u.email).toLowerCase().includes(ql)) add({ kind: 'user', name: u.name, email: u.email, source: 'sample' });
+    const groups = new Set([...Object.values(d.zpaScimGroups || {}).flat().map((g) => g.name), ...(d.demoUsers || []).flatMap((u) => u.groups)]);
+    for (const k of ['urlFilteringRules', 'firewallRules', 'dnsRules', 'sslRules', 'webDlpRules']) for (const r of d[k] || []) for (const g of r.groups || []) groups.add(g.name);
+    for (const g of groups) if (String(g).toLowerCase().includes(ql)) add({ kind: 'group', name: g, source: 'sample' });
+    return res.json({ results: out.slice(0, 30) });
+  }
+  const c = s.client, recs = (x) => (Array.isArray(x) ? x : (x && (x.records || x.list)) || []);
+  const tries = [
+    ['ZIdentity users', async () => { for (const key of ['displayName[like]', 'loginName[like]']) for (const u of recs(await c.get('/ziam/admin/api/v1/users', { [key]: q, limit: '20' }))) add({ kind: 'user', name: u.displayName || u.loginName, email: u.primaryEmail || u.loginName, source: 'ZIdentity' }); }],
+    ['ZIdentity groups', async () => { for (const g of recs(await c.get('/ziam/admin/api/v1/groups', { 'name[like]': q, limit: '20' }))) add({ kind: 'group', name: g.name || g.displayName, source: 'ZIdentity' }); }],
+    ['ZIA users', async () => { for (const u of recs(await c.get(`${ZIA}/users`, { search: q, pageSize: '20' }))) add({ kind: 'user', name: u.name, email: u.email, source: 'ZIA' }); }],
+    ['ZIA groups', async () => { for (const g of recs(await c.get(`${ZIA}/groups`, { search: q, pageSize: '20' }))) add({ kind: 'group', name: g.name, source: 'ZIA' }); }],
+  ];
+  if (c.cfg.zpaCustomerId) {
+    const idps = (d.zpaIdps || []).filter((i) => i.scimEnabled || i.enableScimBasedPolicy).slice(0, 4);
+    for (const idp of idps) tries.push([`ZPA SCIM (${idp.name})`, async () => {
+      const r = await c.get(`/zpa/userconfig/v1/customers/${c.cfg.zpaCustomerId}/scimgroup/idpId/${encodeURIComponent(idp.id)}`, { search: q, pagesize: '20' });
+      for (const g of recs(r)) add({ kind: 'group', name: g.name, source: `ZPA SCIM · ${idp.name}` });
+    }]);
+  }
+  await Promise.all(tries.map(([name, fn]) => fn().catch((e) => failed.push(`${name}: ${e.status || e.message}`))));
+  out.sort((a, b2) => (a.kind === b2.kind ? 0 : a.kind === 'user' ? -1 : 1) || (lc2(a.name).startsWith(ql) ? -1 : 0) - (lc2(b2.name).startsWith(ql) ? -1 : 0));
+  res.json({ results: out.filter((x) => x.name).slice(0, 30), failed });
+}));
+const lc2 = (v) => String(v || '').toLowerCase();
+
 app.post('/api/directory', wrap(async (req, res) => {
   const s = getSession(req, res); if (!s) return;
   const type = ['groups', 'departments', 'users'].includes(req.body.type) ? req.body.type : 'groups';
@@ -364,8 +424,19 @@ app.post('/api/directory', wrap(async (req, res) => {
     for (const k of ['urlFilteringRules', 'firewallRules', 'dnsRules', 'sslRules', 'webDlpRules']) for (const r of (s.snap && s.snap.data[k]) || []) for (const x of r[type] || []) if (x && x.name) seen.set(String(x.id), { id: x.id, name: x.name });
     list = [...seen.values()];
   } else {
-    const out = await s.client.get(`${ZIA}/${type}`, Object.assign({ pageSize: '50' }, q ? { search: q } : {}));
-    list = (Array.isArray(out) ? out : []).map((x) => ({ id: x.id, name: x.name || x.email, email: x.email }));
+    let ziaErr = null;
+    try {
+      const out = await s.client.get(`${ZIA}/${type}`, Object.assign({ pageSize: '50' }, q ? { search: q } : {}));
+      list = (Array.isArray(out) ? out : []).map((x) => ({ id: x.id, name: x.name || x.email, email: x.email }));
+    } catch (e) { ziaErr = e; }
+    if (ziaErr && type !== 'departments') {
+      // ZIA refused (e.g. 403): show ZIdentity matches, but ZIA rules need ZIA IDs, so they are listed for reference only.
+      const recs = (x) => (Array.isArray(x) ? x : (x && x.records) || []);
+      try {
+        const r = await s.client.get(`/ziam/admin/api/v1/${type}`, Object.assign({ limit: '50' }, q ? { [type === 'users' ? 'displayName[like]' : 'name[like]']: q } : {}));
+        list = recs(r).map((x) => ({ id: null, name: x.name || x.displayName || x.loginName, email: x.primaryEmail, note: 'ZIdentity (not usable in a ZIA rule until it syncs to ZIA)' }));
+      } catch { throw ziaErr; }
+    }
   }
   if (q) list = list.filter((x) => (x.name + ' ' + (x.email || '')).toLowerCase().includes(q.toLowerCase()));
   res.json({ results: list.slice(0, 50) });

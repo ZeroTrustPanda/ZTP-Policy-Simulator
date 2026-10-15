@@ -433,3 +433,13 @@ test('ZPA SCIM attribute (email) condition in the same OR block as a SCIM group'
   const other = z({ user: 'x@zerotrusthospital.org', userEmail: 'x@zerotrusthospital.org', userResolved: { email: 'x@zerotrusthospital.org' }, groups: ['Nurses'] });
   assert.equal(other.verdict, 'BLOCK'); assert.equal(other.confidence, 'definite');
 });
+
+test('sample directory users differ on the ZPA PACS rule', () => {
+  const { simulate } = require('../src/engine');
+  const data = require('../src/demo-snapshot.json');
+  const names = Object.fromEntries(Object.values(data.zpaScimGroups).flat().map((g) => [String(g.id), g.name]));
+  const run = (u) => simulate({ data }, { target: M.parseTarget('pacs.hospital.example'), port: 104, protocol: 'tcp', categories: [], resolvedIps: [], groups: u.groups, userResolved: u, user: u.email, notes: [], useZpa: true, zpaScimNames: names }, {}).summary.primary;
+  const [dana, sam] = data.demoUsers;
+  assert.equal(run(dana).action, 'ALLOW');
+  assert.equal(run(sam).action, 'BLOCK');
+});

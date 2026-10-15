@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.0 — 2026-10-15
+- Compare as: up to two user/group picks, side-by-side tiles, module-by-module diff table, verdict line.
+- /api/identities: users and groups from ZIdentity, ZIA and ZPA SCIM, merged and labelled by source.
+- Sample directory users; directory search falls back to ZIdentity when ZIA refuses.
+
 ## 1.5.4 — 2026-10-15
 - ZPA SCIM attribute conditions (email/userName/department/groups) evaluated; attribute names resolved via /idp/{idp}/scimattribute/{id}.
 - User lookup: exact match only (no first-result fallback); email extracted from pasted text; typed email used for ZPA conditions when the user isn't found.

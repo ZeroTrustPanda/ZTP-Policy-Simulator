@@ -1,4 +1,4 @@
-# ZeroTrustPanda ZS Policy Simulator v1.5.4
+# ZeroTrustPanda ZS Policy Simulator v1.6.0
 
 **Would this be allowed, blocked or bypassed — and by what?** A standalone simulator that pulls your live Zscaler policy over OneAPI and evaluates a transaction across ZIA, ZPA and Client Connector the way the cloud would, in rule order, then shows the deciding rule and everything else that could change the outcome.
 
@@ -7,12 +7,12 @@ Companion to the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustP
 ## Downloads
 | Platform | File |
 |---|---|
-| Windows x64 | [ZTP-Policy-Simulator-1.5.4-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.5.4/ZTP-Policy-Simulator-1.5.4-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
-| macOS Apple Silicon | [ZTP-Policy-Simulator-1.5.4-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.5.4/ZTP-Policy-Simulator-1.5.4-macos-arm64.zip) |
-| macOS Intel | [ZTP-Policy-Simulator-1.5.4-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.5.4/ZTP-Policy-Simulator-1.5.4-macos-x64.zip) |
+| Windows x64 | [ZTP-Policy-Simulator-1.6.0-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.0/ZTP-Policy-Simulator-1.6.0-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
+| macOS Apple Silicon | [ZTP-Policy-Simulator-1.6.0-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.0/ZTP-Policy-Simulator-1.6.0-macos-arm64.zip) |
+| macOS Intel | [ZTP-Policy-Simulator-1.6.0-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.0/ZTP-Policy-Simulator-1.6.0-macos-x64.zip) |
 | Source | clone the repo, or GitHub's "Source code" download on the release |
 
-Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.5.4/SHA256SUMS.txt)
+Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.0/SHA256SUMS.txt)
 
 No install, no Node.js required. Run it and it opens `http://127.0.0.1:8787`.
 macOS builds are unsigned — before first run: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`.
@@ -109,6 +109,17 @@ Port from the URL scheme (hostnames assume HTTPS/443) · network service and app
 - Zscaler offers no "evaluate this transaction" API, so evaluation is re-implemented from rule data. Time windows, user agent, device trust, risk score and source-port bypasses are flagged as unknown rather than evaluated.
 - No per-transaction log lookup: the console's transaction-log endpoints refuse API-client tokens. Use the console's Web / Firewall Insights logs for per-transaction proof.
 - ZCC field names follow the shapes verified by the Policy Wizard; report any app profile that shows "no forwarding profile linked".
+
+## Changes in 1.6.0
+- **⚖️ Compare as — up to two users or groups.** In *User / group / location*, search and pick up to two identities, each a user or a group. Simulate runs the same transaction once per pick and shows:
+  - a one-line verdict: different results, same action by different rules, or the same result;
+  - both result tiles side by side;
+  - a module-by-module table of each verdict and deciding rule, with rows that differ highlighted;
+  - full detail for each pick (conditions, Client Connector, every module).
+- **Search across sources** with the same API key. Users and groups come from ZIdentity and ZIA, and groups also from ZPA SCIM (per SCIM-enabled IdP). Each result is labelled with its source. A group found in several sources shows once. Sources that refuse the API client are listed, not fatal.
+- A **user pick** is simulated with their real groups and email. A **group pick** is simulated as a member of that group only.
+- Sample policies include a small directory (four users) so the comparison can be tried offline.
+- The Block it / Allow it user and group search shows ZIdentity matches when ZIA refuses the API client. Those matches are for reference only, because a ZIA rule needs ZIA IDs.
 
 ## Changes in 1.5.4
 - **SCIM attribute conditions are evaluated.** Rules like *SCIM attribute emails.value = jane@acme.org* now match on the user's email. They sit in the same OR block as SCIM groups, so either one allows. Attribute names are read from the IdP's SCIM attribute definitions.
