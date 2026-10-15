@@ -200,6 +200,12 @@ table.cmp tr.diff td { background: rgba(245, 158, 11, .10); }
 table.cmp tr.diff td .form-hint { color: var(--text-secondary); }
 table.cmp tr.diff td:first-child { box-shadow: inset 3px 0 0 #f59e0b; }
 @media (max-width: 1000px) { .cmp-cols { grid-template-columns: 1fr; } }
+.who-box { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-input, var(--bg-secondary)); min-height: 42px; }
+.who-box:focus-within { border-color: var(--accent-blue); }
+.who-box .pill { margin: 0; }
+.who-box input { flex: 1; min-width: 200px; border: none !important; background: transparent !important; padding: 4px !important; box-shadow: none !important; outline: none; }
+.who-tag { font-size: 10px; font-weight: 700; letter-spacing: .04em; opacity: .7; }
+.dir-results div.act { background: var(--bg-card-hover); }
 .dir-results { border: 1px solid var(--border); border-radius: var(--radius); max-height: 180px; overflow-y: auto; margin-top: 6px; background: var(--bg-secondary); }
 .dir-results div { padding: 6px 10px; font-size: 13px; cursor: pointer; } .dir-results div:hover { background: var(--bg-card-hover); }
 .plan-step { border-left: 3px solid var(--accent-blue); padding: 6px 10px; margin: 8px 0; background: var(--bg-secondary); border-radius: 0 var(--radius) var(--radius) 0; font-size: 13px; }
@@ -320,16 +326,13 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
             <label class="chip"><input type="checkbox" data-sec="secFwd">🔀 Test bypass changes (PAC, lists)</label>
           </div>
           <div class="opt" id="secWho"><div class="grid">
-            <div><label class="form-label">User (name or email)</label><input type="text" id="user"></div>
-            <div><label class="form-label">Groups (looked up from ZIA / ZIdentity if blank)</label><input type="text" id="groups" placeholder="comma-separated"></div>
+            <div class="span2"><label class="form-label">User or group</label>
+              <div class="who-box"><span id="cmpPills"></span><input type="text" id="cmpQ" placeholder="Type a name, email or group…" autocomplete="off"></div>
+              <div class="dir-results hidden" id="cmpRes"></div>
+              <div class="form-hint" style="margin-top:6px">ℹ️ Pick one to simulate as that user or group. Pick a second to compare the two side by side.</div>
+            </div>
             <div><label class="form-label">Department</label><input type="text" id="department"></div>
             <div><label class="form-label">Location</label><input type="text" id="location" list="locList"><datalist id="locList"></datalist></div>
-          </div>
-          <div style="margin-top:14px">
-            <label class="form-label">Compare as — pick up to 2 users or groups</label>
-            <div id="cmpPills"></div>
-            <div style="max-width:620px"><input type="text" id="cmpQ" placeholder="Search users and groups (ZIdentity, ZIA, ZPA SCIM)…" autocomplete="off"><div class="dir-results hidden" id="cmpRes"></div></div>
-            <div class="form-hint" style="margin-top:6px">With picks, the transaction runs once per pick and the results show side by side. User, Groups and Department above are ignored while comparing; Location still applies.</div>
           </div></div>
           <div class="opt" id="secWeb"><div class="grid">
             <div><label class="form-label">File type extension</label><input type="text" id="fileType" placeholder="e.g. exe, docx, zip"></div>
@@ -666,11 +669,11 @@ function formBody() {
   return { useZpa: zpaOn(),
     target: v('target'), port: v('port'), protocol: $('protocol').value, networkService: v('networkService'),
     fileType: v('fileType'), operation: v('operation'), method: v('method'), categories: list('cats', true), application: v('application'),
-    user: v('user'), groups: list('groups'), department: v('department'), location: v('location'), sourceIp: v('sourceIp'), destCountry: v('destCountry'),
+    picks: vis('cmpQ') ? cmpPicks : [], department: v('department'), location: v('location'), sourceIp: v('sourceIp'), destCountry: v('destCountry'),
     manual: vis('pacText') ? { pacText: $('pacText').value, destExclusions: $('destExclusions').value, destInclusions: $('destInclusions').value, ipExclusions: $('ipExclusions').value, ipInclusions: $('ipInclusions').value, vpnGateways: $('vpnGateways').value } : {},
   };
 }
-document.querySelectorAll('#singlePanel input[type=text]').forEach((el) => el.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btnSim').click(); }));
+document.querySelectorAll('#singlePanel input[type=text]').forEach((el) => el.addEventListener('keydown', (e) => { if (e.key === 'Enter' && el.id !== 'cmpQ') $('btnSim').click(); }));
 
 // ---------- step 3: results ----------
 const VERDICT = { BLOCKED: ['⛔', 'BLOCKED'], ALLOWED: ['✅', 'ALLOWED'], BYPASSED: ['↪️', 'BYPASSED'], CONDITIONAL: ['❔', 'DEPENDS ON CONTEXT'] };
@@ -741,37 +744,62 @@ function modulesCard(modules, s) {
   }).join('');
   return `<div class="card"><div class="card-header"><h3>Every module</h3><p style="font-size:13px">Click a module for its rules.</p></div>${items}</div>`;
 }
-// ---------- compare as (up to two users or groups) ----------
-let cmpPicks = [], cmpRes = [], cmpTimer = null;
+// ---------- who: up to two users or groups (one = simulate as, two = compare) ----------
+let cmpPicks = [], cmpRes = [], cmpTimer = null, cmpAct = -1;
 function renderCmp() {
-  $('cmpPills').innerHTML = cmpPicks.map((p, i) => `<span class="pill">${p.kind === 'user' ? '👤' : '👥'} ${esc(p.name)}${p.email && p.email !== p.name ? ` <span style="opacity:.75">${esc(p.email)}</span>` : ''}<button data-i="${i}" title="Remove">×</button></span>`).join('');
+  $('cmpPills').innerHTML = cmpPicks.map((p, i) => `<span class="pill">${cmpPicks.length === 2 ? `<span class="who-tag">${i ? 'B' : 'A'}</span>` : ''}${p.kind === 'user' ? '👤' : '👥'} ${esc(p.name)}${p.email && p.email !== p.name ? ` <span style="opacity:.75">${esc(p.email)}</span>` : ''}<button data-i="${i}" title="Remove">×</button></span>`).join('');
   $('cmpQ').disabled = cmpPicks.length >= 2;
-  $('cmpQ').placeholder = cmpPicks.length >= 2 ? 'Two picks selected — remove one to change' : 'Search users and groups (ZIdentity, ZIA, ZPA SCIM)…';
-  $('btnSim').textContent = cmpPicks.length === 2 ? 'Compare' : cmpPicks.length ? 'Simulate as pick' : 'Simulate';
+  $('cmpQ').placeholder = cmpPicks.length >= 2 ? 'Comparing two — remove one to change' : cmpPicks.length ? 'Add a second user or group to compare…' : 'Type a name, email or group…';
+  $('btnSim').textContent = cmpPicks.length === 2 ? 'Compare' : 'Simulate';
+}
+function addPick(x) {
+  if (!x || cmpPicks.length >= 2 || cmpPicks.some((p) => p.kind === x.kind && p.name === x.name && (p.email || '') === (x.email || ''))) return;
+  cmpPicks.push(x); $('cmpQ').value = ''; $('cmpRes').classList.add('hidden'); renderCmp(); $('cmpQ').focus();
+}
+function typedOptions(q) {
+  const isEmail = /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(q);
+  return [{ kind: 'user', name: q, email: isEmail ? q : '', source: 'as typed', typed: true }, { kind: 'group', name: q, source: 'as typed', typed: true }];
+}
+function showCmpRes(q, list, failed) {
+  cmpRes = [...list, ...typedOptions(q)]; cmpAct = list.length ? 0 : -1;
+  const row = (x, i) => x.typed
+    ? `<div data-i="${i}" class="form-hint">Use “${esc(x.name)}” as a ${x.kind}${x.kind === 'user' ? ' (looked up when you simulate)' : ''}</div>`
+    : `<div data-i="${i}" class="${i === cmpAct ? 'act' : ''}">${x.kind === 'user' ? '👤' : '👥'} ${esc(x.name)}${x.email && x.email !== x.name ? ` <span class="form-hint">${esc(x.email)}</span>` : ''} <span class="badge b-slate" style="float:right">${esc(x.source)}</span></div>`;
+  $('cmpRes').innerHTML = (list.length ? '' : '<div class="form-hint" style="cursor:default">No matches in the directory</div>') + cmpRes.map(row).join('')
+    + ((failed || []).length ? `<div class="form-hint" style="cursor:default">Not searched: ${esc(failed.join('; '))}</div>` : '');
+  $('cmpRes').classList.remove('hidden');
 }
 $('cmpPills').addEventListener('click', (e) => { const b = e.target.closest('button[data-i]'); if (!b) return; cmpPicks.splice(+b.dataset.i, 1); renderCmp(); });
 $('cmpQ').addEventListener('input', () => {
   clearTimeout(cmpTimer);
   const q = $('cmpQ').value.trim();
-  if (q.length < 2) { $('cmpRes').classList.add('hidden'); return; }
+  if (q.length < 2) { $('cmpRes').classList.add('hidden'); cmpRes = []; return; }
   cmpTimer = setTimeout(async () => {
-    $('cmpRes').innerHTML = '<div class="form-hint"><span class="spinner"></span> Searching…</div>'; $('cmpRes').classList.remove('hidden');
     try {
       const j = await api('/api/identities', { q });
-      if ($('cmpQ').value.trim() !== q) return;
-      cmpRes = j.results || [];
-      $('cmpRes').innerHTML = (cmpRes.length ? cmpRes.map((x, i) => `<div data-i="${i}">${x.kind === 'user' ? '👤' : '👥'} ${esc(x.name)}${x.email && x.email !== x.name ? ` <span class="form-hint">${esc(x.email)}</span>` : ''} <span class="badge b-slate" style="float:right">${esc(x.source)}</span></div>`).join('') : '<div class="form-hint">No matches</div>')
-        + ((j.failed || []).length ? `<div class="form-hint" style="cursor:default">Not searched: ${esc(j.failed.join('; '))}</div>` : '');
-    } catch (e) { $('cmpRes').innerHTML = `<div class="err">${esc(e.message)}</div>`; }
-  }, 300);
+      if ($('cmpQ').value.trim() !== q) return; // a newer keystroke is in flight
+      showCmpRes(q, j.results || [], j.failed);
+    } catch (e) { $('cmpRes').innerHTML = `<div class="err">${esc(e.message)}</div>`; $('cmpRes').classList.remove('hidden'); }
+  }, 250);
+});
+$('cmpQ').addEventListener('keydown', (e) => {
+  const items = [...$('cmpRes').querySelectorAll('div[data-i]')];
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (!items.length) return; e.preventDefault();
+    cmpAct = (cmpAct + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items.forEach((d, i) => d.classList.toggle('act', i === cmpAct));
+    items[cmpAct].scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    const q = $('cmpQ').value.trim();
+    if (cmpAct >= 0 && cmpRes[cmpAct] && !$('cmpRes').classList.contains('hidden')) addPick(cmpRes[cmpAct]);
+    else if (q) addPick(typedOptions(q)[0]);
+    else $('btnSim').click();
+  } else if (e.key === 'Backspace' && !$('cmpQ').value && cmpPicks.length) { cmpPicks.pop(); renderCmp(); }
+  else if (e.key === 'Escape') $('cmpRes').classList.add('hidden');
 });
 $('cmpQ').addEventListener('blur', () => setTimeout(() => $('cmpRes').classList.add('hidden'), 150));
-$('cmpRes').addEventListener('mousedown', (e) => {
-  const d = e.target.closest('div[data-i]'); if (!d) return;
-  const x = cmpRes[+d.dataset.i];
-  if (x && cmpPicks.length < 2 && !cmpPicks.some((p) => p.kind === x.kind && p.name === x.name && p.email === x.email)) cmpPicks.push(x);
-  $('cmpQ').value = ''; $('cmpRes').classList.add('hidden'); renderCmp();
-});
+$('cmpRes').addEventListener('mousedown', (e) => { const d = e.target.closest('div[data-i]'); if (d) { e.preventDefault(); addPick(cmpRes[+d.dataset.i]); } });
 const pickLabel = (p) => (p.kind === 'user' ? `${p.name}${p.email && p.email !== p.name ? ` (${p.email})` : ''}` : `group ${p.name}`);
 function compareView(j) {
   const runs = j.compare;
@@ -809,8 +837,7 @@ $('btnSim').onclick = async () => {
   $('btnSim').disabled = true; $('simMsg').innerHTML = '<span class="spinner"></span> Evaluating…';
   try {
     const body = formBody();
-    if (cmpPicks.length && vis('cmpQ')) {
-      body.compare = cmpPicks;
+    if (body.picks.length === 2) {
       const j = await api('/api/simulate', body);
       lastSim = { body, result: j.compare[0] };
       const errs = Object.keys((j.snapshot && j.snapshot.errors) || {});
@@ -822,6 +849,7 @@ $('btnSim').onclick = async () => {
     const s = j.summary, c = j.context;
     const errs = Object.keys((j.snapshot && j.snapshot.errors) || {});
     $('simOut').innerHTML = (errs.length ? `<div class="note" style="margin-bottom:10px">Not evaluated (failed to load): ${errs.map(esc).join(', ')}</div>` : '')
+      + (j.pick ? `<div class="form-hint" style="margin-bottom:8px">Simulated as ${j.pick.kind === 'user' ? '👤' : '👥'} <b>${esc(pickLabel(j.pick))}</b>. Add a second user or group to compare.</div>` : '')
       + `<div class="tiles">${actionTile(s, c, j.modules)}${basedOnTile(s, c)}</div>`
       + changeCard(s, c, j.modules) + forwardingCard(j.modules.find((m) => m.module.startsWith('Forwarding')), s) + modulesCard(j.modules, s);
     $('simMsg').textContent = '';

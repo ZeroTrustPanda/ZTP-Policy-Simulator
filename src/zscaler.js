@@ -192,6 +192,8 @@ function zpaEndpoints(customerId) {
     { key: 'zpaAccessPolicySet', group: 'zpa', label: 'ZPA access policy set', path: `${base}/policySet/policyType/ACCESS_POLICY` },
     { key: 'zpaIdps', group: 'zpa', label: 'ZPA identity providers', path: `${v2}/idp`, query: { pagesize: '500' } },
     { key: 'zpaSamlAttributes', group: 'zpa', label: 'ZPA SAML attributes', path: `${v2}/samlAttribute`, query: { pagesize: '500' } },
+    { key: 'zpaPostureProfiles', group: 'zpa', label: 'ZPA posture profiles', path: `${v2}/posture`, query: { pagesize: '500' } },
+    { key: 'zpaTrustedNetworks', group: 'zpa', label: 'ZPA trusted networks', path: `${v2}/network`, query: { pagesize: '500' } },
   ];
 }
 
@@ -299,7 +301,37 @@ async function loadSnapshot(client, { groups = ['zia', 'zcc', 'zpa'], job } = {}
 // from and which still works when ZIA's /users is blocked for the API client.
 const ZID = '/ziam/admin/api/v1';
 const recs = (d) => (Array.isArray(d) ? d : (d && (d.records || d.list || d.items)) || []);
-async function lookupUser(client, nameOrEmail) {
+
+// ZIdentity directory index: every user and group, paged (cached 10 minutes per client). Search and exact lookups
+// run on this list, so they work even if the API ignores a filter parameter. Capped for very large tenants.
+const ZID_MAX = 25000;
+async function zidPaged(client, path) {
+  const out = []; let complete = true;
+  for (let offset = 0; offset < ZID_MAX; offset += 1000) {
+    const page = recs(await client.get(`${ZID}/${path}`, { limit: '1000', offset: String(offset) }));
+    out.push(...page);
+    if (page.length < 1000) break;
+    if (offset + 1000 >= ZID_MAX) complete = false;
+  }
+  return { list: out, complete };
+}
+async function zidIndex(client) {
+  const c = client._zid;
+  if (c && Date.now() - c.at < 600000) return c.promise;
+  const promise = (async () => {
+    const [u, g] = await Promise.all([zidPaged(client, 'users'), zidPaged(client, 'groups').catch(() => ({ list: [], complete: false }))]);
+    return { users: u.list, groups: g.list, complete: u.complete };
+  })();
+  client._zid = { at: Date.now(), promise };
+  promise.catch(() => { client._zid = null; });
+  return promise;
+}
+const zidUserKeys = (x) => [x.loginName, x.primaryEmail, x.secondaryEmail, x.displayName].map((v) => String(v || '').toLowerCase());
+async function zidUserGroups(client, id) {
+  return recs(await client.get(`${ZID}/users/${encodeURIComponent(id)}/groups`, { limit: '1000' })).map((x) => x.name || x.displayName).filter(Boolean);
+}
+
+async function lookupUser(client, nameOrEmail, opts = {}) {
   const q = String(nameOrEmail).toLowerCase();
   let zia = null, ziaErr = null, zid = null, zidErr = null;
   try {
@@ -309,15 +341,19 @@ async function lookupUser(client, nameOrEmail) {
     if (u) zia = { name: u.name, email: u.email, groups: (u.groups || []).map((g) => g.name), department: u.department && u.department.name };
   } catch (e) { ziaErr = e; }
   try {
-    const exact = (list) => list.find((x) => [x.loginName, x.primaryEmail, x.secondaryEmail, x.displayName].some((v) => String(v || '').toLowerCase() === q));
+    const exact = (list) => list.find((x) => zidUserKeys(x).includes(q));
     let u = null;
-    for (const query of [{ loginName: nameOrEmail }, { 'primaryEmail[like]': nameOrEmail }, { 'loginName[like]': nameOrEmail }, { 'displayName[like]': nameOrEmail }]) {
-      try { u = exact(recs(await client.get(`${ZID}/users`, Object.assign({ limit: '50' }, query)))); } catch (e) { if (!zidErr) zidErr = e; }
-      if (u) break;
+    if (opts.zidId) u = { id: opts.zidId, loginName: nameOrEmail, primaryEmail: /@/.test(nameOrEmail) ? nameOrEmail : undefined, displayName: opts.name };
+    let indexComplete = false;
+    if (!u) { try { const idx = await zidIndex(client); u = exact(idx.users); indexComplete = idx.complete; } catch (e) { zidErr = e; } }
+    if (!u && !indexComplete) { // index unavailable or capped: ask the API with filters, still requiring an exact match
+      for (const query of [{ loginName: nameOrEmail }, { 'primaryEmail[like]': nameOrEmail }, { 'loginName[like]': nameOrEmail }]) {
+        try { u = exact(recs(await client.get(`${ZID}/users`, Object.assign({ limit: '100' }, query)))); } catch (e) { if (!zidErr) zidErr = e; }
+        if (u) break;
+      }
     }
     if (u) {
-      const g = recs(await client.get(`${ZID}/users/${encodeURIComponent(u.id)}/groups`, { limit: '1000' }));
-      zid = { name: u.displayName || u.loginName, email: u.primaryEmail || u.loginName, groups: g.map((x) => x.name || x.displayName).filter(Boolean),
+      zid = { name: u.displayName || u.loginName, email: u.primaryEmail || u.loginName, loginName: u.loginName, groups: await zidUserGroups(client, u.id),
         department: u.department && (u.department.displayName || u.department.name), idp: u.idp && (u.idp.displayName || u.idp.name) };
     }
   } catch (e) { zidErr = e; }
@@ -382,4 +418,4 @@ async function refreshKeys(client, snap, keys) {
   snap.loadedAt = Date.now();
 }
 
-module.exports = { zpaScimAttrName, zpaScimGroupName, zpaWorks, zpaIdCandidates, jwtClaims, ZClient, loadSnapshot, refreshKeys, ZIA, zpaBase, CAC_TYPES, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, ENDPOINTS };
+module.exports = { zidIndex, zidUserKeys, zpaScimAttrName, zpaScimGroupName, zpaWorks, zpaIdCandidates, jwtClaims, ZClient, loadSnapshot, refreshKeys, ZIA, zpaBase, CAC_TYPES, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, ENDPOINTS };

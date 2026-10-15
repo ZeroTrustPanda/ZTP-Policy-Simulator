@@ -1,4 +1,4 @@
-# ZeroTrustPanda ZS Policy Simulator v1.6.0
+# ZeroTrustPanda ZS Policy Simulator v1.6.1
 
 **Would this be allowed, blocked or bypassed — and by what?** A standalone simulator that pulls your live Zscaler policy over OneAPI and evaluates a transaction across ZIA, ZPA and Client Connector the way the cloud would, in rule order, then shows the deciding rule and everything else that could change the outcome.
 
@@ -7,12 +7,12 @@ Companion to the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustP
 ## Downloads
 | Platform | File |
 |---|---|
-| Windows x64 | [ZTP-Policy-Simulator-1.6.0-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.0/ZTP-Policy-Simulator-1.6.0-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
-| macOS Apple Silicon | [ZTP-Policy-Simulator-1.6.0-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.0/ZTP-Policy-Simulator-1.6.0-macos-arm64.zip) |
-| macOS Intel | [ZTP-Policy-Simulator-1.6.0-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.0/ZTP-Policy-Simulator-1.6.0-macos-x64.zip) |
+| Windows x64 | [ZTP-Policy-Simulator-1.6.1-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.1/ZTP-Policy-Simulator-1.6.1-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
+| macOS Apple Silicon | [ZTP-Policy-Simulator-1.6.1-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.1/ZTP-Policy-Simulator-1.6.1-macos-arm64.zip) |
+| macOS Intel | [ZTP-Policy-Simulator-1.6.1-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.1/ZTP-Policy-Simulator-1.6.1-macos-x64.zip) |
 | Source | clone the repo, or GitHub's "Source code" download on the release |
 
-Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.0/SHA256SUMS.txt)
+Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.1/SHA256SUMS.txt)
 
 No install, no Node.js required. Run it and it opens `http://127.0.0.1:8787`.
 macOS builds are unsigned — before first run: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`.
@@ -109,6 +109,17 @@ Port from the URL scheme (hostnames assume HTTPS/443) · network service and app
 - Zscaler offers no "evaluate this transaction" API, so evaluation is re-implemented from rule data. Time windows, user agent, device trust, risk score and source-port bypasses are flagged as unknown rather than evaluated.
 - No per-transaction log lookup: the console's transaction-log endpoints refuse API-client tokens. Use the console's Web / Firewall Insights logs for per-transaction proof.
 - ZCC field names follow the shapes verified by the Policy Wizard; report any app profile that shows "no forwarding profile linked".
+
+## Changes in 1.6.1
+- **One "User or group" field** replaces the separate User, Groups and Compare as fields. Pick one user or group to simulate as it. Pick a second to compare side by side. The button changes to **Compare**.
+  - Arrow keys and Enter choose from the list. Backspace removes the last pick.
+  - "Use … as a user" and "Use … as a group" cover names that aren't in the directory.
+- **Search shows only what matches what you typed.** The ZIdentity directory is read once per session (paged, up to 25,000 users) and filtered locally, so results stay relevant even when the API ignores its search filters. ZIA and ZPA SCIM results are filtered the same way.
+- **Fixed:** a user shown in the list could come back as "not found in ZIA or ZIdentity". Lookups now use the same directory index, or the ZIdentity ID from the pick, and still require an exact match.
+- **ZPA device conditions:**
+  - When the user and app match an Allow rule and only device posture or trusted network is left open, the result is **Allow if the device passes**, instead of default deny. *Policy action also based on* shows that a failing device is blocked.
+  - Posture profiles and trusted networks are loaded so conditions show their names.
+  - Client type is assumed to be Client Connector.
 
 ## Changes in 1.6.0
 - **⚖️ Compare as — up to two users or groups.** In *User / group / location*, search and pick up to two identities, each a user or a group. Simulate runs the same transaction once per pick and shows:

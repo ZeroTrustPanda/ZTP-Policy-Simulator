@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.1 — 2026-10-15
+- Single "User or group" picker (1 = simulate as, 2 = compare); keyboard navigation; typed fallbacks.
+- ZIdentity directory index (paged, cached 10 min) for search and exact lookups; all search sources filtered locally; picks carry the ZIdentity ID.
+- ZPA: allow conditional on device posture / trusted network when identity matches; posture profiles and trusted networks loaded; CLIENT_TYPE assumes Client Connector.
+
 ## 1.6.0 — 2026-10-15
 - Compare as: up to two user/group picks, side-by-side tiles, module-by-module diff table, verdict line.
 - /api/identities: users and groups from ZIdentity, ZIA and ZPA SCIM, merged and labelled by source.

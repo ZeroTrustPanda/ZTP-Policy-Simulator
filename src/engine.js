@@ -666,6 +666,19 @@ function zpaEvalRules(rules, z, snap = {}, ctx = {}) {
           if (/department/i.test(key) && ctx.department) return { s: vals.some((v) => lc(v) === lc(ctx.department)) ? 'match' : 'nomatch', d: label };
           return { s: 'unknown', d: label };
         }
+        if (t === 'POSTURE') {
+          const pp = arr(snap.zpaPostureProfiles).find((x) => String(x.postureUdid || x.id) === String(o.lhs));
+          return { s: 'unknown', d: `device posture "${(pp && pp.name) || o.lhs}" ${lc(vals[0]) === 'false' ? 'fails' : 'passes'}` };
+        }
+        if (t === 'TRUSTED_NETWORK') {
+          const tn = arr(snap.zpaTrustedNetworks).find((x) => String(x.networkId || x.id) === String(o.lhs));
+          return { s: 'unknown', d: `${lc(vals[0]) === 'false' ? 'not on' : 'on'} trusted network "${(tn && tn.name) || o.lhs}"` };
+        }
+        if (t === 'CLIENT_TYPE') {
+          // The simulator models Client Connector traffic, so that client type is assumed.
+          const zcc = vals.some((v) => /zapp/i.test(v));
+          return { s: zcc ? 'match' : 'nomatch', d: `client type ${vals.map((v) => v.replace(/^zpn_client_type_/, '')).join(', ')}${zcc ? ' (Client Connector assumed)' : ' (simulator assumes Client Connector)'}` };
+        }
         return { s: 'unknown', d: `${t}${vals.length ? ' ' + vals.slice(0, 3).join(', ') : ''}` };
       };
       const results = ops.map((o) => Object.assign({ o }, evalOp(o)));
@@ -677,7 +690,7 @@ function zpaEvalRules(rules, z, snap = {}, ctx = {}) {
       const isApp = /^(APP|APP_GROUP)(\/(APP|APP_GROUP))?$/.test(types);
       const detail = isApp ? `${what} — ${here}${z.apps.length && z.apps[0].segmentGroupId ? ` (group "${sgName(z.apps[0].segmentGroupId) || z.apps[0].segmentGroupId}")` : ''}`
         : status === 'unknown' ? `${what} — depends on user/device context${idKnown ? ' not available from the lookup' : ' (enter a user)'}` : `${what} — ${status === 'match' ? 'user matches' : 'user does not match'}`;
-      crits.push({ field: types || 'condition', status, kind: /SCIM|SAML|IDP|USER/.test(types) ? 'identity' : 'other', scope: types, detail });
+      crits.push({ field: types || 'condition', status, kind: /SCIM|SAML|IDP|USER/.test(types) ? 'identity' : /POSTURE|TRUSTED_NETWORK|PLATFORM|COUNTRY|RISK|CHROME/.test(types) ? 'device' : 'other', scope: types, detail });
     }
     const e = evalRule(r, crits);
     e.action = r.action;
@@ -748,6 +761,18 @@ function mZpa(snap, ctx) {
   else {
     out.verdict = 'BLOCK'; out.reason = 'Matched an application segment but no access rule allows it (ZPA default deny)';
     const maybe = out.couldOverride.filter((e) => !/DENY/.test(e.action || ''));
+    // First unresolved rule is an Allow whose only open conditions are about the device: report it as the outcome,
+    // conditional on the device (identity and app already match).
+    const first = out.couldOverride[0];
+    if (first && !/DENY/.test(first.action || '') && first.criteria.filter((c) => c.status === 'unknown').every((c) => c.kind === 'device')) {
+      const need = first.criteria.filter((c) => c.status === 'unknown').map((c) => c.detail.replace(/ — .*$/, ''));
+      out.decidingRule = first; out.verdict = 'ALLOW'; out.confidence = 'conditional';
+      out.reason = `Access rule "${first.name}" allows it if the ${need.join(' and ')}. Otherwise ZPA denies by default.`;
+      out.deviceConditional = need;
+      out.couldOverride = out.couldOverride.slice(1);
+      out.stages.push({ step: 'Access policy', status: 'unknown', detail: out.reason });
+      return out;
+    }
     if (maybe.length) out.reason = `No access rule allows everyone, so ZPA denies by default. Allowed for users who match ${maybe.slice(0, 3).map((e) => `"${e.name}" (${e.criteria.filter((c) => c.status === 'unknown').map((c) => c.detail.replace(/ — .*$/, '')).join('; ')})`).join(' or ')}. ${ctx.user ? (ctx.userResolved ? 'The user\'s details don\'t settle those conditions.' : `${ctx.user} wasn't found in ZIA or ZIdentity, so its groups are unknown: enter them in Groups to check.`) : 'Enter the user to check.'}`;
     const misses = evaluated.filter((e) => e.status === 'nomatch' && !/DENY/.test(e.action || '')).slice(0, 4)
       .map((e) => `"${e.name}": ${(e.criteria.filter((c) => c.status === 'nomatch').map((c) => c.detail)[0]) || 'no match'}`);
@@ -950,6 +975,7 @@ function summarize(modules, ctx = {}) {
       const unk = (r.criteria || []).filter((c) => c.status === 'unknown');
       alsoBasedOn.push({ kind: 'zpa', condition: unk.map(condLabel).join(' + ') || 'context not supplied', action: /BYPASS/i.test(r.action) ? 'BYPASS' : 'ALLOW', module: 'ZPA client forwarding policy', rule: r.name, order: r.order });
     }
+    if (zpa.deviceConditional) alsoBasedOn.unshift({ kind: 'zpa', condition: `Device check fails (needs: ${zpa.deviceConditional.join(' and ')})`, action: 'BLOCK', module: 'ZPA Access Policy', rule: null, detail: `Rule "${zpa.decidingRule.name}" then doesn't apply, and ZPA denies by default` });
     if (zpa.onNet) alsoBasedOn.push({ kind: 'zpa', condition: `On a trusted (on-net) network: segment "${zpa.onNet.segment}" bypasses ZPA`, action: 'BYPASS', module: 'ZPA segment', rule: null, detail: 'Then it is handled as internet traffic (Client Connector / ZIA)' });
   } else {
     const pipeline = modules.filter((m) => !m.module.startsWith('Forwarding') && m.module !== 'ZPA Access Policy' && !['N/A'].includes(m.verdict));

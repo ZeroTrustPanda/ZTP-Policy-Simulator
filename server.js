@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const dns = require('dns').promises;
 const { exec } = require('child_process');
 
-const { ZClient, loadSnapshot, refreshKeys, ZIA, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, zpaWorks, zpaScimGroupName, zpaScimAttrName } = require('./src/zscaler');
+const { ZClient, loadSnapshot, refreshKeys, ZIA, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, zpaWorks, zpaScimGroupName, zpaScimAttrName, zidIndex } = require('./src/zscaler');
 const changes = require('./src/changes');
 const bulk = require('./src/bulk');
 const recommend = require('./src/recommend');
@@ -188,7 +188,7 @@ async function buildContext(s, b) {
     s.userCache = s.userCache || new Map();
     try {
       const k = String(b.user).toLowerCase();
-      if (!s.userCache.has(k)) s.userCache.set(k, await lookupUser(s.client, b.user));
+      if (!s.userCache.has(k) || (b.zidId && !s.userCache.get(k))) s.userCache.set(k, await lookupUser(s.client, b.user, { zidId: b.zidId, name: b.userName }));
       const u = s.userCache.get(k);
       if (u) {
         ctx.groups = u.groups; ctx.department = ctx.department || u.department; ctx.userResolved = u;
@@ -229,16 +229,26 @@ app.post('/api/simulate', wrap(async (req, res) => {
   if (!s.snap) return res.status(409).json({ error: 'Policies are not loaded yet. Click "Load policies" first.' });
   const b = req.body;
   if (!b.target && !b.ip && !b.port && !b.networkService && !b.application && !b.fileType) return res.status(400).json({ error: 'Enter at least a destination, port, network service, application or file type.' });
-  // Compare mode: the same transaction as up to two identities (each a user or a group).
-  if (Array.isArray(b.compare) && b.compare.length) {
-    const picks = b.compare.slice(0, 2);
+  // Who: picks[] holds up to two identities (user or group). One → simulate as it; two → compare side by side.
+  const asPick = async (pk) => {
+    const b2 = Object.assign({}, b, { picks: undefined });
+    if (pk.kind === 'group') Object.assign(b2, { user: '', groups: [String(pk.name)] });
+    else Object.assign(b2, { user: String(pk.email || pk.name || ''), groups: [], zidId: pk.zidId || null, userName: pk.name });
+    const ctx = await buildContext(s, b2);
+    if (pk.kind === 'group') ctx.notes.unshift(`Simulated as a member of group "${pk.name}"${pk.source ? ` (${pk.source})` : ''} only, with no user-specific attributes.`);
+    return ctx;
+  };
+  const picks = Array.isArray(b.picks) ? b.picks.slice(0, 2) : [];
+  if (picks.length === 1) {
+    const out = simulate(s.snap, await asPick(picks[0]), b.manual || {});
+    out.snapshot = { loadedAt: s.snap.loadedAt, errors: s.snap.errors, counts: counts(s.snap) };
+    out.pick = picks[0];
+    return res.json(out);
+  }
+  if (picks.length === 2) {
     const runs = [];
     for (const pk of picks) {
-      const b2 = Object.assign({}, b, { compare: undefined, department: '' });
-      if (pk.kind === 'group') Object.assign(b2, { user: '', groups: [String(pk.name)] });
-      else Object.assign(b2, { user: String(pk.email || pk.name || ''), groups: [] });
-      const ctx = await buildContext(s, b2);
-      if (pk.kind === 'group') ctx.notes.unshift(`Simulated as a member of group "${pk.name}"${pk.source ? ` (${pk.source})` : ''} only, with no user-specific attributes.`);
+      const ctx = await asPick(pk);
       const out = simulate(s.snap, ctx, b.manual || {});
       runs.push(Object.assign({ pick: pk }, out));
     }
@@ -385,7 +395,8 @@ app.post('/api/identities', wrap(async (req, res) => {
   const q = String((req.body && req.body.q) || '').trim();
   if (q.length < 2) return res.json({ results: [] });
   const ql = q.toLowerCase(), out = [], failed = [];
-  const add = (x) => { if (!out.some((y) => y.kind === x.kind && lc2(y.name) === lc2(x.name) && lc2(y.email) === lc2(x.email))) out.push(x); else { const y = out.find((y2) => y2.kind === x.kind && lc2(y2.name) === lc2(x.name) && lc2(y2.email) === lc2(x.email)); if (!y.source.includes(x.source)) y.source += ' · ' + x.source; } };
+  const hit = (v) => String(v || '').toLowerCase().includes(ql); // every source is filtered here, whatever the API returned
+  const add = (x) => { if (!out.some((y) => y.kind === x.kind && lc2(y.name) === lc2(x.name) && lc2(y.email) === lc2(x.email))) out.push(x); else { const y = out.find((y2) => y2.kind === x.kind && lc2(y2.name) === lc2(x.name) && lc2(y2.email) === lc2(x.email)); if (!y.source.includes(x.source)) y.source += ' · ' + x.source; if (x.zidId && !y.zidId) y.zidId = x.zidId; } };
   const d = (s.snap && s.snap.data) || {};
   if (s.demo || !s.client) {
     for (const u of d.demoUsers || []) if ((u.name + ' ' + u.email).toLowerCase().includes(ql)) add({ kind: 'user', name: u.name, email: u.email, source: 'sample' });
@@ -396,20 +407,24 @@ app.post('/api/identities', wrap(async (req, res) => {
   }
   const c = s.client, recs = (x) => (Array.isArray(x) ? x : (x && (x.records || x.list)) || []);
   const tries = [
-    ['ZIdentity users', async () => { for (const key of ['displayName[like]', 'loginName[like]']) for (const u of recs(await c.get('/ziam/admin/api/v1/users', { [key]: q, limit: '20' }))) add({ kind: 'user', name: u.displayName || u.loginName, email: u.primaryEmail || u.loginName, source: 'ZIdentity' }); }],
-    ['ZIdentity groups', async () => { for (const g of recs(await c.get('/ziam/admin/api/v1/groups', { 'name[like]': q, limit: '20' }))) add({ kind: 'group', name: g.name || g.displayName, source: 'ZIdentity' }); }],
-    ['ZIA users', async () => { for (const u of recs(await c.get(`${ZIA}/users`, { search: q, pageSize: '20' }))) add({ kind: 'user', name: u.name, email: u.email, source: 'ZIA' }); }],
-    ['ZIA groups', async () => { for (const g of recs(await c.get(`${ZIA}/groups`, { search: q, pageSize: '20' }))) add({ kind: 'group', name: g.name, source: 'ZIA' }); }],
+    ['ZIdentity', async () => {
+      const idx = await zidIndex(c);
+      for (const u of idx.users) if ([u.displayName, u.loginName, u.primaryEmail].some(hit)) add({ kind: 'user', name: u.displayName || u.loginName, email: u.primaryEmail || u.loginName, source: 'ZIdentity', zidId: u.id });
+      for (const g of idx.groups) if (hit(g.name || g.displayName)) add({ kind: 'group', name: g.name || g.displayName, source: 'ZIdentity' });
+    }],
+    ['ZIA users', async () => { for (const u of recs(await c.get(`${ZIA}/users`, { search: q, pageSize: '50' }))) if (hit(u.name) || hit(u.email)) add({ kind: 'user', name: u.name, email: u.email, source: 'ZIA' }); }],
+    ['ZIA groups', async () => { for (const g of recs(await c.get(`${ZIA}/groups`, { search: q, pageSize: '50' }))) if (hit(g.name)) add({ kind: 'group', name: g.name, source: 'ZIA' }); }],
   ];
   if (c.cfg.zpaCustomerId) {
     const idps = (d.zpaIdps || []).filter((i) => i.scimEnabled || i.enableScimBasedPolicy).slice(0, 4);
     for (const idp of idps) tries.push([`ZPA SCIM (${idp.name})`, async () => {
       const r = await c.get(`/zpa/userconfig/v1/customers/${c.cfg.zpaCustomerId}/scimgroup/idpId/${encodeURIComponent(idp.id)}`, { search: q, pagesize: '20' });
-      for (const g of recs(r)) add({ kind: 'group', name: g.name, source: `ZPA SCIM · ${idp.name}` });
+      for (const g of recs(r)) if (hit(g.name)) add({ kind: 'group', name: g.name, source: `ZPA SCIM · ${idp.name}` });
     }]);
   }
   await Promise.all(tries.map(([name, fn]) => fn().catch((e) => failed.push(`${name}: ${e.status || e.message}`))));
-  out.sort((a, b2) => (a.kind === b2.kind ? 0 : a.kind === 'user' ? -1 : 1) || (lc2(a.name).startsWith(ql) ? -1 : 0) - (lc2(b2.name).startsWith(ql) ? -1 : 0));
+  const pre = (x) => ([x.name, x.email].some((v) => lc2(v).startsWith(ql)) ? 0 : 1);
+  out.sort((a, b2) => (a.kind === b2.kind ? 0 : a.kind === 'user' ? -1 : 1) || pre(a) - pre(b2) || lc2(a.name).localeCompare(lc2(b2.name)));
   res.json({ results: out.filter((x) => x.name).slice(0, 30), failed });
 }));
 const lc2 = (v) => String(v || '').toLowerCase();

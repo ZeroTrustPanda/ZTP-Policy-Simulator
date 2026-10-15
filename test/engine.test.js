@@ -392,7 +392,9 @@ test('user lookup falls back to ZIdentity when ZIA /users is blocked', async () 
   const client = { get: async (p, q) => {
     calls.push(p);
     if (p === '/zia/api/v1/users') throw Object.assign(new Error('HTTP 403 GET /zia/api/v1/users: {"message":"Resource Access Blocked"}'), { status: 403 });
-    if (p === '/ziam/admin/api/v1/users') return { records: q.loginName ? [{ id: 'u1', loginName: 'jpuglise@zerotrusthospital.org', displayName: 'J Puglise', primaryEmail: 'jpuglise@zerotrusthospital.org' }] : [] };
+    // Filters ignored, like the live tenant: every call returns the whole (paged) directory.
+    if (p === '/ziam/admin/api/v1/users') return { records: +(q.offset || 0) ? [] : [{ id: 'u0', loginName: 'hajny@zerotrusthospital.org' }, { id: 'u1', loginName: 'jpuglise@zerotrusthospital.org', displayName: 'J Puglise', primaryEmail: 'jpuglise@zerotrusthospital.org' }] };
+    if (p === '/ziam/admin/api/v1/groups') return { records: [] };
     if (p === '/ziam/admin/api/v1/users/u1/groups') return { records: [{ id: 'g1', name: 'Radiologists' }, { id: 'g2', name: 'All Staff' }] };
     throw new Error('unexpected ' + p);
   } };
@@ -400,6 +402,7 @@ test('user lookup falls back to ZIdentity when ZIA /users is blocked', async () 
   assert.equal(u.source, 'ZIdentity');
   assert.deepEqual(u.groups, ['Radiologists', 'All Staff']);
   assert.match(u.ziaError, /403/);
+  assert.equal(await lookupUser(client, 'nobody@zerotrusthospital.org'), null); // exact match only, never the first user
 });
 
 test('ZPA access rules match SCIM groups and SAML email for a looked-up user', () => {
@@ -442,4 +445,20 @@ test('sample directory users differ on the ZPA PACS rule', () => {
   const [dana, sam] = data.demoUsers;
   assert.equal(run(dana).action, 'ALLOW');
   assert.equal(run(sam).action, 'BLOCK');
+});
+
+test('ZPA: identity matches and only device posture is open → allow, conditional on the device', () => {
+  const { simulate } = require('../src/engine');
+  const data = JSON.parse(JSON.stringify(require('../src/demo-snapshot.json')));
+  data.zpaApps.push({ id: '8020', name: 'ZTH Rad', domainNames: ['rad.zerotrusthospital.org'], segmentGroupId: '5060', tcpPortRanges: ['8042', '8042'] });
+  data.zpaPostureProfiles = [{ id: 'p1', postureUdid: 'abc', name: 'CrowdStrike ZTA' }];
+  data.zpaAccessRules.push({ id: 'ro', name: 'Radiologists Only', action: 'ALLOW', ruleOrder: '3', conditions: [
+    { operands: [{ objectType: 'APP_GROUP', rhs: '5060' }] }, { operands: [{ objectType: 'SCIM_GROUP', rhs: '777' }] },
+    { operands: [{ objectType: 'POSTURE', lhs: 'abc', rhs: 'true' }] }, { operands: [{ objectType: 'CLIENT_TYPE', rhs: 'zpn_client_type_zapp' }] }] });
+  const run = (groups) => simulate({ data }, { target: M.parseTarget('rad.zerotrusthospital.org'), port: 8042, protocol: 'tcp', categories: [], resolvedIps: [], groups, userResolved: { email: 'j@x' }, user: 'j@x', notes: [], useZpa: true, zpaScimNames: { 777: 'radiologists' } }, {});
+  const yes = run(['Radiologists']);
+  assert.equal(yes.summary.primary.action, 'ALLOW'); assert.equal(yes.modules[0].confidence, 'conditional');
+  assert.match(yes.modules[0].reason, /device posture "CrowdStrike ZTA" passes/);
+  assert.ok(yes.summary.alsoBasedOn.some((x) => /Device check fails/.test(x.condition) && x.action === "BLOCK"));
+  assert.equal(run(['Nursing']).summary.primary.action, 'BLOCK');
 });
