@@ -1,6 +1,6 @@
 # 🐼 ZeroTrustPanda ZS Policy Simulator
 
-**Downloads (v1.4.0):** [Windows x64](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.4.0/ZTP-Policy-Simulator-1.4.0-windows-x64.zip) · [macOS Apple Silicon](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.4.0/ZTP-Policy-Simulator-1.4.0-macos-arm64.zip) · [macOS Intel](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.4.0/ZTP-Policy-Simulator-1.4.0-macos-x64.zip) · [SHA256SUMS](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.4.0/SHA256SUMS.txt) — all builds in [`downloads/`](downloads/). Release notes: [RELEASE_NOTES.md](RELEASE_NOTES.md) · history: [CHANGELOG.md](CHANGELOG.md)
+**Downloads (v1.5.0):** [Windows x64](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.5.0/ZTP-Policy-Simulator-1.5.0-windows-x64.zip) · [macOS Apple Silicon](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.5.0/ZTP-Policy-Simulator-1.5.0-macos-arm64.zip) · [macOS Intel](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.5.0/ZTP-Policy-Simulator-1.5.0-macos-x64.zip) · [SHA256SUMS](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.5.0/SHA256SUMS.txt) — all builds in [`downloads/`](downloads/). Release notes: [RELEASE_NOTES.md](RELEASE_NOTES.md) · history: [CHANGELOG.md](CHANGELOG.md)
 
 Standalone tool that answers "would this be allowed, blocked or bypassed — and by what?" against your live Zscaler policy. Same look as the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustPanda/ZTP-Policy-Wizard).
 
@@ -19,6 +19,24 @@ Below the tiles:
 - **Every module** — firewall, DNS, SSL, ATP, URL filtering, file type, sandbox, DLP, ZPA, with all evaluated rules on click.
 
 Smart defaults: port from the URL scheme (hostnames assume HTTPS/443), network service/application inferred from protocol+port (UDP/443 → QUIC), request method GET (CONNECT when not decrypted), file type from the URL path, standard DNS resolver for DNS app rules. Every assumption is stated on the result and can be overridden.
+
+## Evaluation order
+The simulator follows the path a transaction takes:
+
+1. **ZPA first.** If the destination (and port) matches an application segment, it checks the segment's **Bypass** setting (Never / On-Net / Always), then the **Client Forwarding Policy** (Intercept / Intercept Accessible / Bypass). If ZPA carries the traffic, the **Access Policy** decides, and ZIA and the internet bypasses don't apply.
+2. **Client Connector bypasses, per app profile and network type:**
+   1. Process-based bypass. This is flagged when configured but not evaluated, because it depends on the client process.
+   2. VPN gateway bypass.
+   3. ZPA segment Always-bypass and 4. ZPA client forwarding (both in step 1).
+   5. **PAC file** for web traffic on 80/443: DIRECT, sent to another proxy, or sent to Zscaler.
+   6. IP-based application bypass.
+   7. Z-Tunnel 2.0 exclusions (domain and IP).
+   8. Z-Tunnel 2.0 inclusions.
+3. **ZIA, in this order:** Advanced Threat Protection → Firewall → DNS Control → URL Filtering → **Cloud App Control** (new) → Sandbox → File Type Control → DLP. SSL Inspection is applied as a modifier: it decides whether ATP, URL Filtering, DLP and the others can see inside HTTPS.
+
+**🔒 Include ZPA** (next to the Single / Bulk switch) turns ZPA on or off for simulations. The choice is remembered and also unticks ZPA when loading policies, so tenants without ZPA are never queried. It is off and greyed out when no ZPA policy is loaded.
+
+**Cloud App Control** rules are loaded for every rule type. A rule matches when Zscaler's URL lookup names the destination's cloud application. Partial restrictions, such as allowing use but denying uploads, are shown as notes.
 
 ## Bulk test (CSV)
 Switch the Simulate step to **📋 Bulk test (CSV)** to run thousands of destinations at once (about a minute for 50,000 IPs, plus the category lookup).
@@ -61,6 +79,14 @@ The simulator can now fix what it finds. It is **read-only until you switch on "
 - **Sample and offline sessions** apply changes to the in-memory policy only, so you can rehearse a change and re-simulate before touching a tenant.
 - **API client:** needs ZIA read/write scope in ZIdentity for changes. Payloads follow the ZeroTrustPanda Policy Wizard's verified templates, and the block workflow has been tested end to end on a live ZIA tenant. If ZIA rejects a call, the result names the call and ZIA's error, and undo reverts the steps that ran.
 
+### ZPA private application
+In the change wizard, switch to **🔒 Private application (ZPA)**. It is preselected when ZPA decided the result, or when allowing private (RFC 1918) addresses. Single results that Client Connector bypasses also offer **🔒 Add as a ZPA private application…**.
+- **Application segment:** create one (name, TCP/UDP ports, existing or new segment group, server groups), or add the destinations to an existing segment.
+- **Access policy rule:** Allow, or Block (DENY), at a position you choose from the live access policy. It applies to everyone (the app only), to **SCIM groups** (pick the IdP, search groups), or to **SAML attribute = value** conditions.
+- **Preview, save and undo** work the same as for ZIA. ZPA changes take effect when saved (no activation).
+- **Bulk recommendations** now point private addresses that Client Connector bypasses to ZPA.
+- **Not yet run against a live tenant:** the ZPA reads added in 1.5.0 (client forwarding policy, server groups, IdPs, SAML attributes, SCIM groups), ZPA writes (create/update segment, segment group, access rule, reorder) and Cloud App Control matching. They follow Zscaler's API reference and the SDK conventions and are tested against the in-memory ZPA. Try them on ZTH first.
+
 ## Run
 - Windows: `ZTP-Policy-Simulator.exe` — serves http://127.0.0.1:8787 and opens your browser (`PORT`, `NO_OPEN=1` supported).
 - macOS: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`, then run it.
@@ -70,7 +96,7 @@ The simulator can now fix what it finds. It is **read-only until you switch on "
 ## API notes
 - Auth mirrors the wizard: client-credentials token without audience for ZIA/ZCC/ZPA.
 - ZCC field names follow the wizard's verified templates (`packetTunnelIncludeList/ExcludeList`, `packetTunnelDnsIncludeList/ExcludeList`, `vpnGateways`, `appServiceIds`, `pac_url`, `onNetPolicy`, `forwardingProfileActions[]`).
-- Not evaluated (flagged as unknown): time windows, user-agent, device trust, risk score, source-port bypasses.
+- Not evaluated (flagged as unknown): time windows, user-agent, device trust, risk score, source-port bypasses, process-based bypasses, ZPA user/posture conditions.
 
 ## Project layout
 - `server.js` — local Express server (loopback only) and API routes

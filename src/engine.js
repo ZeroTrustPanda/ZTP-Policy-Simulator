@@ -586,14 +586,12 @@ function zpaMatch(snap, ctx) {
   }
   return { apps: matched, groups: [...new Set(matched.map((m) => String(m.segmentGroupId)).filter(Boolean))] };
 }
-function mZpa(snap, ctx) {
-  if (!snap.zpaAccessRules) return null;
-  const z = zpaMatch(snap, ctx);
-  const out = { module: 'ZPA Access Policy', verdict: 'NOT_A_ZPA_APP', confidence: 'definite', decidingRule: null, couldOverride: [], rules: [], considered: 0, matchedSegments: z.apps, reason: 'Destination does not match any ZPA application segment, so ZPA policy does not apply (traffic follows ZIA/forwarding)' };
-  if (!z.apps.length) return out;
+// ZPA operand evaluation shared by access and client forwarding policy: app / segment group are known, the rest
+// (SCIM, SAML, posture, client type, trusted network…) depends on user and device context.
+function zpaEvalRules(rules, z) {
   const appIds = z.apps.map((a) => String(a.id));
-  const rules = sortRules(snap.zpaAccessRules.map((r) => Object.assign({ order: r.ruleOrder != null ? +r.ruleOrder : r.order }, r))).filter((r) => lc(r.disabled) !== '1' && lc(r.disabled) !== 'true');
-  const evaluated = rules.map((r) => {
+  const sorted = sortRules(arr(rules).map((r) => Object.assign({ order: r.ruleOrder != null ? +r.ruleOrder : r.order }, r))).filter((r) => lc(r.disabled) !== '1' && lc(r.disabled) !== 'true');
+  return sorted.map((r) => {
     const crits = [];
     for (const c of arr(r.conditions)) {
       const ops = arr(c.operands);
@@ -607,18 +605,81 @@ function mZpa(snap, ctx) {
       const types = [...new Set(ops.map((o) => o.objectType))].join('/');
       let status = results.some((x) => x.s === 'match') ? 'match' : results.some((x) => x.s === 'unknown') ? 'unknown' : 'nomatch';
       if (c.operator === 'AND') status = results.some((x) => x.s === 'nomatch') ? 'nomatch' : results.some((x) => x.s === 'unknown') ? 'unknown' : 'match';
-      crits.push({ field: types || 'condition', status, detail: status === 'unknown' ? `${types} condition depends on user/device context (not supplied)` : `${types} ${status}` });
+      crits.push({ field: types || 'condition', status, kind: /SCIM|SAML|IDP|USER/.test(types) ? 'identity' : 'other', scope: types, detail: status === 'unknown' ? `${types} condition depends on user/device context (not supplied)` : `${types} ${status}` });
     }
     const e = evalRule(r, crits);
     e.action = r.action;
     return e;
   });
+}
+
+// ZPA is evaluated first. A destination that matches an application segment goes: segment Bypass setting →
+// Client Forwarding Policy → Access Policy. If ZPA carries it, ZIA and Client Connector internet bypasses don't apply.
+function mZpa(snap, ctx) {
+  if (ctx.useZpa === false) return { module: 'ZPA Access Policy', verdict: 'N/A', confidence: 'definite', decidingRule: null, couldOverride: [], rules: [], considered: 0, stages: [], reason: 'ZPA is turned off for this simulation' };
+  if (!snap.zpaApps && !snap.zpaAccessRules) return null;
+  const z = zpaMatch(snap, ctx);
+  const out = { module: 'ZPA Access Policy', verdict: 'NOT_A_ZPA_APP', confidence: 'definite', decidingRule: null, couldOverride: [], rules: [], considered: 0, matchedSegments: z.apps, stages: [], reason: 'Destination does not match any ZPA application segment, so ZPA does not carry it' };
+  if (!z.apps.length) return out;
+  const seg = arr(snap.zpaApps).find((a) => String(a.id) === String(z.apps[0].id)) || {};
+  out.stages.push({ step: 'Application segment', status: 'match', detail: `${z.apps.map((a) => `"${a.name}" (${a.via})`).join(', ')}` });
+  // Segment Bypass setting
+  const bt = String(seg.bypassType || 'NEVER').toUpperCase();
+  if (bt === 'ALWAYS') {
+    out.stages.push({ step: 'Segment bypass', status: 'match', detail: `"${seg.name}" is set to always bypass ZPA` });
+    return Object.assign(out, { verdict: 'ZPA_BYPASS', reason: `Segment "${seg.name}" is set to always bypass ZPA, so it is handled as internet traffic`, decidingRule: { name: `Segment "${seg.name}" Bypass: Always`, action: 'BYPASS', criteria: [] } });
+  }
+  if (bt === 'ON_NET') {
+    out.stages.push({ step: 'Segment bypass', status: 'unknown', detail: `"${seg.name}" bypasses ZPA on trusted (on-net) networks; off-net it uses ZPA` });
+    out.onNet = { segment: seg.name };
+  } else out.stages.push({ step: 'Segment bypass', status: 'nomatch', detail: 'Never bypass' });
+  // Client Forwarding Policy
+  if (snap.zpaForwardingRules) {
+    const fr = zpaEvalRules(snap.zpaForwardingRules, z);
+    const idx = fr.findIndex((e) => e.status === 'match');
+    const pre = fr.slice(0, idx < 0 ? fr.length : idx).filter((e) => e.status === 'unknown');
+    const isBypass = (a) => /BYPASS/i.test(a || '');
+    out.forwardingRules = fr;
+    out.fwdCouldOverride = pre.filter((e) => isBypass(e.action) !== (idx >= 0 && isBypass(fr[idx].action)));
+    if (idx >= 0 && isBypass(fr[idx].action)) {
+      out.stages.push({ step: 'Client forwarding policy', status: 'match', detail: `rule "${fr[idx].name}" → ${fr[idx].action}` });
+      return Object.assign(out, { verdict: 'ZPA_BYPASS', reason: `ZPA client forwarding rule "${fr[idx].name}" bypasses ZPA, so it is handled as internet traffic`, decidingRule: fr[idx], couldOverride: out.fwdCouldOverride });
+    }
+    out.stages.push({ step: 'Client forwarding policy', status: idx >= 0 ? 'match' : 'nomatch', detail: idx >= 0 ? `rule "${fr[idx].name}" → ${fr[idx].action}` : 'no rule matched; ZPA intercepts by default' });
+  } else out.stages.push({ step: 'Client forwarding policy', status: 'unknown', detail: 'not loaded; assumed intercept' });
+  // Access Policy
+  if (!snap.zpaAccessRules) { out.stages.push({ step: 'Access policy', status: 'unknown', detail: 'not loaded' }); return Object.assign(out, { verdict: 'ALLOW', confidence: 'conditional', reason: 'ZPA carries it; access policy not loaded' }); }
+  const evaluated = zpaEvalRules(snap.zpaAccessRules, z);
   const idx = evaluated.findIndex((e) => e.status === 'match');
   out.rules = evaluated; out.considered = evaluated.length;
   out.couldOverride = evaluated.slice(0, idx < 0 ? evaluated.length : idx).filter((e) => e.status === 'unknown');
-  if (idx >= 0) { out.decidingRule = evaluated[idx]; out.verdict = /DENY/.test(evaluated[idx].action) ? 'BLOCK' : 'ALLOW'; out.reason = `Rule "${evaluated[idx].name}" matched`; }
+  if (idx >= 0) { out.decidingRule = evaluated[idx]; out.verdict = /DENY/.test(evaluated[idx].action) ? 'BLOCK' : 'ALLOW'; out.reason = `Access rule "${evaluated[idx].name}" matched`; }
   else { out.verdict = 'BLOCK'; out.reason = 'Matched an application segment but no access rule allows it (ZPA default deny)'; }
-  if (out.couldOverride.length) out.confidence = 'conditional';
+  out.stages.push({ step: 'Access policy', status: idx >= 0 ? 'match' : 'nomatch', detail: out.reason });
+  if (out.couldOverride.length || (out.fwdCouldOverride || []).length || out.onNet) out.confidence = 'conditional';
+  return out;
+}
+
+// Cloud App Control: rules per application type; the destination's cloud app comes from Zscaler's URL lookup.
+function cacAction(r) {
+  const acts = arr(r.actions).map(String);
+  if (!acts.length) return r.action || 'ALLOW';
+  if (acts.some((a) => /ISOLATE/i.test(a))) return 'ISOLATE';
+  if (acts.some((a) => /^BLOCK$|DENY.*(VIEW|ACCESS|BROWSE|ALL|USE)|BLOCK_ALL/i.test(a))) return 'BLOCK';
+  if (acts.some((a) => /CAUTION/i.test(a))) return 'CAUTION';
+  return 'ALLOW';
+}
+function mCloudApp(snap, ctx) {
+  if (!snap.cloudAppRules) return { module: 'Cloud App Control', verdict: 'N/A', confidence: 'definite', decidingRule: null, couldOverride: [], rules: [], considered: 0, reason: 'Cloud App Control rules not loaded' };
+  const app = ctx.cloudApp;
+  if (!app) return { module: 'Cloud App Control', verdict: 'ALLOW', confidence: 'definite', decidingRule: null, couldOverride: [], rules: [], considered: 0, reason: 'No cloud application identified for this destination (Zscaler lookup returned none)' };
+  const rel = arr(snap.cloudAppRules).filter((r) => arr(r.applications).some((a) => lc((a && (a.name || a.id)) || a) === lc(app)))
+    .map((r) => Object.assign({}, r, { action: cacAction(r), _acts: arr(r.actions) }));
+  const out = runModule('Cloud App Control', rel, (r) => [critIdentity(r, ctx), critLocation(r, ctx), critTimeWindows(r),
+    { field: 'cloud app', status: 'match', detail: `${app} (${r.ruleType || r.type || 'app'}${r._acts.length ? '; actions ' + r._acts.slice(0, 4).join(', ') : ''})` }],
+  { blockRe: /BLOCK/, allowRe: /ALLOW/, defaultReason: `no Cloud App Control rule for ${app}` });
+  const partial = out.decidingRule && /ALLOW/.test(out.decidingRule.action) ? arr((rel.find((r) => r.id === out.decidingRule.id) || {})._acts).filter((a) => /DENY|BLOCK/i.test(a)) : [];
+  if (partial.length) out.note = `Allowed, but restricts: ${partial.join(', ')}`;
   return out;
 }
 
@@ -713,19 +774,22 @@ function simulate(snap, ctx, manual = {}) {
     else { c2.method = 'GET'; c2.methodReason = isHttp ? 'plain HTTP' : 'HTTPS decrypted'; }
   }
   // Order roughly follows the ZIA processing path; the summary reports the first block in this order.
+  // Order: ZPA first, then Client Connector / PAC forwarding, then ZIA (SSL inspection as a modifier, ATP, Firewall,
+  // DNS, URL Filtering, Cloud App Control, Sandbox, File Type Control, DLP).
+  const zpa = mZpa(data, c2);
   const modules = [
+    ...(zpa ? [zpa] : []),
     fwd,
-    mFirewall(data, c2),
-    hasHost ? mDns(data, c2) : naNoDest('DNS Control', c2.target ? 'Not applicable: destination is an IP address (no DNS lookup)' : 'Not evaluated: no destination host entered'),
     ssl,
     web ? mAtp(data, c2) : na('Advanced Threat Protection'),
+    mFirewall(data, c2),
+    hasHost ? mDns(data, c2) : naNoDest('DNS Control', c2.target ? 'Not applicable: destination is an IP address (no DNS lookup)' : 'Not evaluated: no destination host entered'),
     web ? mUrlFiltering(data, c2) : na('URL Filtering'),
-    web ? mFileType(data, c2) : na('File Type Control'),
+    web ? mCloudApp(data, c2) : na('Cloud App Control'),
     web ? mSandbox(data, c2) : na('Sandbox (Behavioral Analysis)'),
+    web ? mFileType(data, c2) : na('File Type Control'),
     web ? mDlp(data, c2) : na('Data Loss Prevention'),
   ];
-  const zpa = mZpa(data, c2);
-  if (zpa) modules.push(zpa);
   return { context: c2, modules, summary: summarize(modules, c2) };
 }
 
@@ -777,10 +841,17 @@ function summarize(modules, ctx = {}) {
 
   // ZIA (or ZPA) outcome for traffic that reaches Zscaler
   let zia;
-  if (zpa && zpa.verdict !== 'NOT_A_ZPA_APP') {
+  const zpaDecides = !!(zpa && ['ALLOW', 'BLOCK'].includes(zpa.verdict));
+  if (zpa && zpa.verdict === 'ZPA_BYPASS') lines.push(`${zpa.reason}.`);
+  if (zpaDecides) {
     zia = pick(zpa, zpa.verdict === 'BLOCK' ? 'BLOCK' : 'ALLOW');
-    lines.push(`Destination is a ZPA application segment (${(zpa.matchedSegments || []).map((x) => x.name).join(', ')}) — ZPA access policy decides, not ZIA.`);
+    lines.push(`Destination is a ZPA application segment (${(zpa.matchedSegments || []).map((x) => x.name).join(', ')}): ZPA carries it and its access policy decides; ZIA policy and internet bypasses don't apply.`);
     addConds(zpa);
+    for (const r of zpa.fwdCouldOverride || []) {
+      const unk = (r.criteria || []).filter((c) => c.status === 'unknown');
+      alsoBasedOn.push({ kind: 'zpa', condition: unk.map(condLabel).join(' + ') || 'context not supplied', action: /BYPASS/i.test(r.action) ? 'BYPASS' : 'ALLOW', module: 'ZPA client forwarding policy', rule: r.name, order: r.order });
+    }
+    if (zpa.onNet) alsoBasedOn.push({ kind: 'zpa', condition: `On a trusted (on-net) network: segment "${zpa.onNet.segment}" bypasses ZPA`, action: 'BYPASS', module: 'ZPA segment', rule: null, detail: 'Then it is handled as internet traffic (Client Connector / ZIA)' });
   } else {
     const pipeline = modules.filter((m) => !m.module.startsWith('Forwarding') && m.module !== 'ZPA Access Policy' && !['N/A'].includes(m.verdict));
     const finalIdx = pipeline.findIndex((m) => ['BLOCK', 'ISOLATE', 'CAUTION'].includes(m.verdict) && m.confidence === 'definite' && !(m.module === 'Data Loss Prevention'));
@@ -816,11 +887,13 @@ function summarize(modules, ctx = {}) {
   // Forwarding decides whether ZIA sees it at all
   let primary;
   const fwdB = bypasses.filter((b) => b.kind === 'forwarding');
-  if (fw && fw.verdict === 'BYPASSES_ZSCALER') {
+  if (fw && fw.verdict === 'BYPASSES_ZSCALER' && !zpaDecides) {
     primary = { module: 'Client Connector forwarding', action: 'BYPASS', rule: fw.decidingRule.name, criteria: fw.decidingRule.criteria, reason: fw.reason, confidence: 'definite', tags: [] };
     alsoBasedOn.length = 0;
     alsoBasedOn.unshift({ kind: 'zia', condition: 'If it were forwarded to Zscaler', action: zia.action, module: zia.module, rule: zia.rule, order: zia.order });
     lines.unshift('Traffic bypasses Zscaler (PAC/ZCC bypass) — no ZIA policy is applied.');
+  } else if (zpaDecides) {
+    primary = Object.assign({}, zia, { tags: [] });
   } else {
     primary = Object.assign({}, zia, { tags });
     for (const b of fwdB) alsoBasedOn.push({ kind: 'zcc', condition: b.where, action: 'BYPASS', module: 'Client Connector forwarding', rule: null, detail: b.how + (b.captured ? '' : ' (not captured by ZCC)') });
@@ -829,7 +902,7 @@ function summarize(modules, ctx = {}) {
 
   // de-duplicate, keep order: identity, location, other, zcc, content, input
   const seen = new Set();
-  const order = { zia: -1, identity: 0, location: 1, other: 2, zcc: 3, content: 4, input: 5 };
+  const order = { zia: -1, identity: 0, location: 1, other: 2, zpa: 3, zcc: 3, content: 4, input: 5 };
   const conds = alsoBasedOn.filter((c) => { const k = c.kind + c.condition + c.action + c.rule; if (seen.has(k)) return false; seen.add(k); return true; })
     .sort((a, b) => (order[a.kind] - order[b.kind]));
 
@@ -841,4 +914,4 @@ function summarize(modules, ctx = {}) {
   return { overall, headline, primary, alsoBasedOn: conds, decider, allowedBy, bypasses, inspections, lines };
 }
 
-module.exports = { simulate, rationalize, ATP_CATEGORY_MAP, WELL_KNOWN, fileTypeMatch, FILETYPE_ALIASES, mUrlFiltering, mFirewall, mDns, mSandbox, mFileType, mDlp, mSsl, mAtp, mZpa, mForwarding, sortRules };
+module.exports = { simulate, rationalize, mCloudApp, cacAction, ATP_CATEGORY_MAP, WELL_KNOWN, fileTypeMatch, FILETYPE_ALIASES, mUrlFiltering, mFirewall, mDns, mSandbox, mFileType, mDlp, mSsl, mAtp, mZpa, mForwarding, sortRules };

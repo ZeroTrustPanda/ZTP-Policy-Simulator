@@ -283,7 +283,10 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
       </section>
 
       <section id="step3" class="hidden">
-        <div class="seg" id="modeSeg" role="tablist"><button class="on" data-mode="single" role="tab">🎯 Single transaction</button><button data-mode="bulk" role="tab">📋 Bulk test (CSV)</button></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+          <div class="seg" id="modeSeg" role="tablist"><button class="on" data-mode="single" role="tab">🎯 Single transaction</button><button data-mode="bulk" role="tab">📋 Bulk test (CSV)</button></div>
+          <label class="switch blue" id="zpaSwitch" style="margin-bottom:1.25rem" title="Evaluate ZPA application segments, client forwarding and access policy first"><input type="checkbox" id="useZpa"><span class="knob"></span><span>🔒 Include ZPA <span class="form-hint" id="zpaHint"></span></span></label>
+        </div>
         <div id="singlePanel">
         <div class="card">
           <div class="card-header"><h2>Simulate a transaction</h2><p>Every field is optional. Leave Destination blank to ask "is this port or service blocked for everyone?"</p></div>
@@ -381,11 +384,46 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
   <div class="modal">
     <div class="modal-hd"><div><h2 id="chgTitle">Change policy</h2><div class="form-hint" id="chgSub"></div></div><button class="btn btn-ghost btn-sm" id="chgX">Cancel</button></div>
     <div class="modal-bd" id="chgForm">
+      <div class="seg hidden" id="chgKind" style="margin-bottom:12px"><button data-kind="zia" class="on">🌐 Internet &amp; SaaS (ZIA)</button><button data-kind="zpa">🔒 Private application (ZPA)</button></div>
       <div class="step-blk"><div class="t">1 · Destinations</div>
         <div id="chgEntriesInfo" class="msg"></div>
         <textarea id="chgEntries" style="margin-top:8px;min-height:90px" placeholder="One IP, CIDR, range or host per line"></textarea>
         <label class="switch blue" style="margin-top:10px;font-size:13px"><input type="checkbox" id="chgCollapse" checked><span class="knob"></span><span>Collapse adjacent IPs into CIDRs (fewer entries)</span></label>
       </div>
+      <div id="chgZpaBlocks" class="hidden">
+        <div class="step-blk"><div class="t">2 · Application segment</div>
+          <div class="radio-row"><label><input type="radio" name="zSegMode" value="new" checked> Create a new segment</label><label><input type="radio" name="zSegMode" value="existing"> Add to an existing segment</label></div>
+          <div id="zSegNew">
+            <div class="grid"><div class="span2"><label class="form-label">Segment name</label><input type="text" id="zSegName"></div>
+              <div><label class="form-label">TCP ports</label><input type="text" id="zTcp" placeholder="e.g. 443, 8443-8445"></div>
+              <div><label class="form-label">UDP ports</label><input type="text" id="zUdp" placeholder="optional"></div></div>
+            <div class="radio-row" style="margin-top:12px"><label><input type="radio" name="zSgMode" value="existing" checked> Existing segment group</label><label><input type="radio" name="zSgMode" value="new"> New segment group</label></div>
+            <select id="zSgSel"></select><input type="text" id="zSgName" class="hidden" placeholder="Segment group name">
+            <label class="form-label" style="margin-top:12px">Server groups (App Connectors that reach the app)</label><div class="chips" id="zSrv"></div>
+          </div>
+          <div id="zSegExisting" class="hidden"><select id="zSegSel"></select><div class="form-hint" style="margin-top:6px">Destinations are added to the segment; its ports and server groups stay as they are.</div></div>
+        </div>
+        <div class="step-blk"><div class="t">3 · Access policy rule</div>
+          <label class="switch blue" style="font-size:14px;margin-bottom:10px"><input type="checkbox" id="zRuleOn" checked><span class="knob"></span><span id="zRuleLbl">Create an access rule for this segment</span></label>
+          <div id="zRuleBox">
+            <div class="grid"><div><label class="form-label">Rule name</label><input type="text" id="zRuleName"></div>
+              <div class="span2"><label class="form-label">Position</label><select id="zRulePos"></select></div></div>
+            <label class="form-label" style="margin-top:12px">Who</label>
+            <div class="msg" id="zWhoNone">Everyone (the rule matches the application only).</div>
+            <div id="zWho" style="margin-top:6px"></div>
+            <div class="grid" style="margin-top:8px">
+              <div><select id="zIdp"></select></div>
+              <div class="span2"><input type="text" id="zScimQ" placeholder="Search SCIM groups…" autocomplete="off"><div class="dir-results hidden" id="zScimRes"></div></div>
+            </div>
+            <div class="grid" style="margin-top:8px">
+              <div><select id="zSamlSel"></select></div>
+              <div><input type="text" id="zSamlVal" placeholder="SAML attribute value"></div>
+              <div><button class="btn btn-ghost btn-sm" id="zSamlAdd" type="button">Add SAML condition</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="chgZiaBlocks">
       <div class="step-blk"><div class="t">2 · Where to apply</div>
         <div class="chips" id="chgAreas">
           <label class="chip"><input type="checkbox" value="url">🌐 URL Filtering (web)</label>
@@ -413,6 +451,7 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
           <div><select id="chgDirType"><option value="groups">Groups</option><option value="departments">Departments</option><option value="users">Users</option><option value="locations">Locations</option></select></div>
           <div class="span2"><input type="text" id="chgDirQ" placeholder="Search to add…" autocomplete="off"><div class="dir-results hidden" id="chgDirRes"></div></div>
         </div>
+      </div>
       </div>
       <div id="chgPlan"></div>
     </div>
@@ -459,8 +498,20 @@ function refreshSidebar() {
 }
 document.querySelectorAll('.sidebar-item[data-step]').forEach((el) => el.onclick = () => go(+el.dataset.step));
 function setAuth(text, ok) { $('authText').textContent = text; $('authBadge').className = 'auth-badge ' + (ok ? 'connected' : 'disconnected'); }
+let zpaLoaded = false;
+function zpaOn() { return zpaLoaded && $('useZpa').checked; }
+function syncZpa() {
+  const want = (() => { try { return localStorage.getItem('ztp-sim.zpa') !== '0'; } catch { return true; } })();
+  $('useZpa').disabled = !zpaLoaded;
+  $('useZpa').checked = zpaLoaded && want;
+  $('zpaSwitch').style.opacity = zpaLoaded ? '' : '.55';
+  $('zpaHint').textContent = zpaLoaded ? '' : '(not loaded: add a ZPA customer ID and tick ZPA when loading policies)';
+}
+$('useZpa').addEventListener('change', () => { try { localStorage.setItem('ztp-sim.zpa', $('useZpa').checked ? '1' : '0'); } catch {} });
 function setLoaded(snap) {
   loaded = !!snap;
+  zpaLoaded = !!(snap && snap.counts && (snap.counts.zpaApps != null || snap.counts.zpaAccessRules != null));
+  syncZpa();
   $('loadedBadge').classList.toggle('hidden', !snap);
   if (snap) {
     const total = Object.values(snap.counts || {}).reduce((a, b) => a + b, 0);
@@ -471,6 +522,7 @@ function setLoaded(snap) {
 }
 
 // ---------- chips ----------
+$('zpaChip').querySelector('input').addEventListener('change', (e) => { try { localStorage.setItem('ztp-sim.zpa', e.target.checked ? '1' : '0'); } catch {} });
 document.querySelectorAll('.chip').forEach((ch) => {
   const cb = ch.querySelector('input');
   ch.addEventListener('click', (ev) => { ev.preventDefault(); if (cb.disabled) return; cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); });
@@ -491,6 +543,8 @@ $('btnConnect').onclick = async () => {
     $('probeOut').innerHTML = probeHtml(j.probe) + `<div class="form-hint" style="margin-top:8px">Token: ${esc(j.tokenHost)} · API: ${esc(j.apiHost)}</div>`;
     $('zpaChip').classList.toggle('hidden', !(j.catalog || []).some((c) => c.group === 'zpa'));
     const zpaCb = $('zpaChip').querySelector('input'); if ($('zpaChip').classList.contains('hidden')) { zpaCb.checked = false; }
+    try { if (localStorage.getItem('ztp-sim.zpa') === '0') zpaCb.checked = false; } catch {}
+    zpaCb.parentNode.classList.toggle('on', zpaCb.checked);
     for (const g of document.querySelectorAll('.grp')) { const n = { zia: 'ZIA', zcc: 'ZCC', zpa: 'ZPA' }[g.value]; if (j.probe && j.probe[n] && !j.probe[n].ok) g.checked = false; g.parentNode.classList.toggle('on', g.checked); }
     $('connMsg').textContent = '';
     setLoaded(null); $('loadTable').innerHTML = ''; $('btnToSim').classList.add('hidden'); $('loadMsg').textContent = ''; $('btnLoad').textContent = 'Load policies';
@@ -564,7 +618,7 @@ function vis(id) { const el = $(id); const sec = el && el.closest('.opt'); retur
 function v(id) { return vis(id) ? $(id).value.trim() : ''; }
 function list(id, up) { return v(id).split(',').map((x) => (up ? x.trim().toUpperCase() : x.trim())).filter(Boolean); }
 function formBody() {
-  return {
+  return { useZpa: zpaOn(),
     target: v('target'), port: v('port'), protocol: $('protocol').value, networkService: v('networkService'),
     fileType: v('fileType'), operation: v('operation'), method: v('method'), categories: list('cats', true), application: v('application'),
     user: v('user'), groups: list('groups'), department: v('department'), location: v('location'), sourceIp: v('sourceIp'), destCountry: v('destCountry'),
@@ -586,7 +640,7 @@ function ruleBox(r, tag) {
   return `<div class="rule-box"><div><span class="nm">${esc(r.name)}</span> ${r.order != null && r.order >= 0 ? `<span class="badge b-slate">order ${esc(r.order)}</span>` : ''} ${r.action ? badgeFor(r.action) : ''} ${tag ? `<span class="badge b-purple">${esc(tag)}</span>` : ''}</div>${crits(r.criteria)}${r.engines && r.engines.length ? `<div class="form-hint">DLP engines: ${esc(r.engines.join(', '))}</div>` : ''}</div>`;
 }
 const ACT = { BLOCK: ['⛔', 'BLOCK', 'b-red'], ALLOW: ['✅', 'ALLOW', 'b-green'], BYPASS: ['↪', 'BYPASS', 'b-slate'], ISOLATE: ['🧪', 'ISOLATE', 'b-cyan'], CAUTION: ['⚠️', 'CAUTION', 'b-amber'] };
-const KIND_ICON = { identity: '👥', location: '📍', other: '⏱', zcc: '💻', content: '📄', input: '✏️', zia: '🌐' };
+const KIND_ICON = { identity: '👥', location: '📍', other: '⏱', zcc: '💻', content: '📄', input: '✏️', zia: '🌐', zpa: '🔒' };
 function actBadge(a) { const x = ACT[a] || ['•', a, 'b-slate']; return `<span class="badge ${x[2]}">${x[0]} ${esc(x[1])}</span>`; }
 function actionTile(s, c, modules) {
   const p = s.primary, [ico, word] = ACT[p.action] || ['•', p.action];
@@ -636,7 +690,7 @@ function modulesCard(modules, s) {
     const isDec = m.module === dec && s.overall !== 'ALLOWED';
     const sub = m.decidingRule ? `rule "${m.decidingRule.name}"` : m.reason;
     return `<div class="mod"><div class="hd" onclick="this.parentNode.classList.toggle('open')"><span class="name">${esc(m.module)}</span>${isDec ? '<span class="badge b-blue">decides</span>' : ''}<span class="sub">${esc(sub || '')}</span>${m.confidence && m.confidence !== 'definite' ? `<span class="badge b-purple">${esc(m.confidence)}</span>` : ''}${badgeFor(m.verdict)}</div>
-      <div class="bd"><div class="msg">${esc(m.reason)}</div>${m.note ? `<div class="note" style="margin-top:6px">${esc(m.note)}</div>` : ''}${(m.matchedSegments || []).length ? `<div class="form-hint">Matched segment(s): ${m.matchedSegments.map((x) => esc(x.name)).join(', ')}</div>` : ''}
+      <div class="bd"><div class="msg">${esc(m.reason)}</div>${m.note ? `<div class="note" style="margin-top:6px">${esc(m.note)}</div>` : ''}${(m.matchedSegments || []).length ? `<div class="form-hint">Matched segment(s): ${m.matchedSegments.map((x) => esc(x.name)).join(', ')}</div>` : ''}${(m.stages || []).length ? `<div style="margin-top:6px">${m.stages.map((st, i) => `<div class="crit"><span class="f">${i + 1}. ${esc(st.step)}</span><span class="st ${esc(st.status)}">${esc(st.status)}</span><span>${esc(st.detail)}</span></div>`).join('')}</div>` : ''}
       ${m.decidingRule ? ruleBox(m.decidingRule, 'deciding') : ''}${(m.couldOverride || []).map((r) => ruleBox(r, 'unresolved')).join('')}
       ${(m.rules || []).length ? `<details><summary>All ${m.rules.length} evaluated rule(s)</summary>${m.rules.map((r) => ruleBox(r, r.status)).join('')}</details>` : ''}</div></div>`;
   }).join('');
@@ -741,7 +795,7 @@ $('btnBulk').onclick = async () => {
   if (!csv.trim()) { msg('bulkMsg', 'Choose a CSV file or paste a list first.'); return; }
   $('btnBulk').disabled = true; $('bulkMsg').innerHTML = '<span class="spinner"></span> Reading the list…';
   try {
-    const j = await api('/api/bulk/start', { csv, fileName: bulkName || 'pasted-list', lookup: $('bulkLookup').checked && !demo, defaultPort: $('bulkPort').value.trim(), defaultProtocol: $('bulkProto').value, expected: $('bulkExpect').value });
+    const j = await api('/api/bulk/start', { csv, fileName: bulkName || 'pasted-list', lookup: $('bulkLookup').checked && !demo, defaultPort: $('bulkPort').value.trim(), defaultProtocol: $('bulkProto').value, expected: $('bulkExpect').value, useZpa: zpaOn() });
     $('bulkMsg').textContent = ''; renderBulk(j); pollBulk();
   } catch (e) { msg('bulkMsg', e.message); $('btnBulk').disabled = false; }
 };
@@ -794,7 +848,7 @@ function renderBulk(j) {
     const prev = pv.length
       ? `<div class="tablewrap"><table><tr><th class="cb"><input type="checkbox" id="selAllShown" title="Tick all shown rows"></th><th>Destination</th><th>Category</th><th>Result</th><th>Module · rule</th><th>${R ? 'Recommendation' : 'Could be blocked by'}</th></tr>${pv.map((r) => `<tr><td class="cb">${r.error ? '' : `<input type="checkbox" class="rowSel" data-row="${esc(r.row)}">`}</td><td class="mono">${esc(r.target)}${r.label ? `<div class="form-hint">${esc(r.label)}</div>` : ''}</td><td class="mono">${esc(r.category || '')}${r.securityCategory ? ` <span class="badge b-red">${esc(r.securityCategory)}</span>` : ''}</td><td>${r.error ? '<span class="badge b-red">error</span>' : actBadge(r.action)}${r.expected ? `<div class="form-hint">expected ${esc(r.expected.toLowerCase())}</div>` : ''}</td><td>${r.error ? `<span class="err">${esc(r.error)}</span>` : `${esc(r.module || '')}${r.rule ? ` · <b>${esc(r.rule)}</b>` : ''}`}</td><td class="form-hint">${R ? (r.area ? `<span class="area-tag">${esc(r.area)}</span> ` : '') + esc(r.recommendation || '') : esc(r.couldBlock || '')}</td></tr>`).join('')}</table></div>${pv.length >= 200 ? '<div class="form-hint" style="margin-top:6px">Showing the first 200 flagged rows. The CSV has all of them.</div>' : ''}`
       : '<div class="empty">Nothing flagged: every row was allowed and no condition would block it.</div>';
-    const AREA_ICON = { ATP: '🛡', Firewall: '🧱', 'URL Filtering': '🌐', DNS: '🔤', 'Client Connector': '💻', 'Cloud App': '☁️' };
+    const AREA_ICON = { ATP: '🛡', Firewall: '🧱', 'URL Filtering': '🌐', DNS: '🔤', 'Client Connector': '💻', 'Cloud App': '☁️', ZPA: '🔒' };
     const recCard = R ? `<div class="card"><div class="card-header"><h3>Recommendations</h3><p style="font-size:13px">Rows checked against the expected result, and the best place in policy to fix the ones that don't match.</p></div>
       <div style="display:flex;gap:2rem;flex-wrap:wrap;margin-bottom:12px"><div><div class="meets" style="color:#6ee7b7">${num(R.meets)}</div><div class="form-hint">meet the expectation</div></div><div><div class="meets" style="color:${R.misses ? '#fca5a5' : '#6ee7b7'}">${num(R.misses)}</div><div class="form-hint">don't</div></div></div>
       ${R.byArea.length ? `<div class="tablewrap"><table><tr><th>Expected</th><th>Fix in</th><th style="text-align:right">Rows</th><th>What to do (first example)</th><th></th></tr>${R.byArea.map((a) => `<tr><td>${actBadge(a.expected)}</td><td><span class="area-tag">${AREA_ICON[a.area] || '•'} ${esc(a.area)}</span></td><td style="text-align:right">${num(a.count)}</td><td>${esc(a.recommendation)}<div class="form-hint mono">${a.examples.map(esc).join(', ')}${a.count > a.examples.length ? ' …' : ''}</div></td><td><a class="linkbtn" href="${href('&list=mismatch&area=' + encodeURIComponent(a.area))}" download title="One destination per line, to paste into an IP group or custom URL category">⬇ list</a></td></tr>`).join('')}</table></div>` : '<div class="empty">Everything matches the expected result.</div>'}
@@ -808,7 +862,7 @@ function renderBulk(j) {
 }
 
 // ---------- policy changes ----------
-const AREA_OF = { 'URL Filtering': 'url', Firewall: 'firewall', 'DNS Control': 'dns', 'Advanced Threat Protection': 'atp' };
+const AREA_OF = { 'URL Filtering': 'url', Firewall: 'firewall', 'DNS Control': 'dns', 'Advanced Threat Protection': 'atp', 'ZPA Access Policy': 'zpa' };
 const AREA_NAME = { url: 'URL Filtering', firewall: 'Firewall Filtering', dns: 'DNS Control', atp: 'ATP' };
 const RULE_SHORT = { url: 'URL', firewall: 'FW', dns: 'DNS' };
 let CHG = null;
@@ -821,7 +875,7 @@ function changeCard(s, c, modules) {
   window.__lastChange = { entry, decider: { area: AREA_OF[p.module], module: p.module, ruleName: p.rule, ruleId: mod && mod.decidingRule ? mod.decidingRule.id : null } };
   let text, btn;
   if (['BLOCK', 'CAUTION', 'ISOLATE'].includes(p.action)) { text = `${p.action === 'BLOCK' ? 'Blocked' : p.action === 'CAUTION' ? 'Cautioned' : 'Isolated'} by ${esc(p.module)}${p.rule ? ` rule <b>${esc(p.rule)}</b>` : ''}.`; btn = `<button class="btn btn-success" onclick="openChange({intent:'ALLOW', entries:[window.__lastChange.entry], decider: window.__lastChange.decider, source:'single'})">✅ Allow it…</button>`; }
-  else if (p.action === 'BYPASS') { text = 'Bypassed by Client Connector, so ZIA never sees it. A ZIA rule only takes effect once the app profile stops bypassing it.'; btn = `<button class="btn btn-ghost" onclick="openChange({intent:'BLOCK', entries:[window.__lastChange.entry], decider: window.__lastChange.decider, source:'single'})">⛔ Block it in ZIA anyway…</button>`; }
+  else if (p.action === 'BYPASS') { text = 'Bypassed by Client Connector, so ZIA never sees it. A ZIA rule only takes effect once the app profile stops bypassing it.'; btn = `<div class="btn-group" style="margin:0">${zpaLoaded ? `<button class="btn btn-primary" onclick="openChange({intent:'ALLOW', kind:'zpa', entries:[window.__lastChange.entry], decider: window.__lastChange.decider, source:'single'})">🔒 Add as a ZPA private application…</button>` : ''}<button class="btn btn-ghost" onclick="openChange({intent:'BLOCK', entries:[window.__lastChange.entry], decider: window.__lastChange.decider, source:'single'})">⛔ Block it in ZIA anyway…</button></div>`; }
   else { text = `Allowed${p.rule ? ` by ${esc(p.module)} rule <b>${esc(p.rule)}</b>` : ''}.`; btn = `<button class="btn btn-primary" style="background:var(--accent-red)" onclick="openChange({intent:'BLOCK', entries:[window.__lastChange.entry], decider: window.__lastChange.decider, source:'single'})">⛔ Block it…</button>`; }
   return `<div class="card"><div class="change-card"><div><h3 style="font-size:15px;margin-bottom:2px">Change this result</h3><div class="msg">${text} Create or update a custom category, destination group and rule for <span class="mono">${esc(entry)}</span>.</div></div>${btn}</div></div>`;
 }
@@ -870,7 +924,8 @@ $('bulkOut').addEventListener('click', async (e) => {
 async function openChange(o) {
   let ctx;
   try { ctx = await api('/api/changes/context'); } catch (e) { alertMsg(e.message); return; }
-  CHG = Object.assign({ crit: { groups: [], departments: [], users: [], locations: [] }, ruleState: {} }, o, { ctx });
+  CHG = Object.assign({ crit: { groups: [], departments: [], users: [], locations: [] }, ruleState: {}, zwho: [] }, o, { ctx });
+  CHG.port = (lastSim && lastSim.result && lastSim.result.context && o.source === 'single') ? lastSim.result.context : null;
   if (CHG.decider && CHG.decider.ruleName && !CHG.decider.ruleId && ctx.rules[CHG.decider.area]) {
     const r = ctx.rules[CHG.decider.area].find((x) => x.name === CHG.decider.ruleName); if (r) CHG.decider.ruleId = r.id;
   }
@@ -898,7 +953,87 @@ async function openChange(o) {
   $('chgApply').classList.add('hidden'); $('chgWriteWrap').classList.add('hidden'); $('chgPreview').classList.remove('hidden');
   $('chgForm').querySelectorAll('input,select,textarea,button').forEach((x) => { x.disabled = false; });
   $('chgPreview').disabled = false; $('chgApply').disabled = false; CHG.plan = null;
+  $('chgKind').classList.toggle('hidden', !zpaLoaded);
+  const priv = o.entries.length && o.entries.every((x) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(x));
+  setKind(zpaLoaded && (o.kind === 'zpa' || (o.decider && o.decider.area === 'zpa') || (priv && o.intent === 'ALLOW')) ? 'zpa' : 'zia');
   $('chgModal').classList.remove('hidden'); document.body.style.overflow = 'hidden';
+}
+// ---- ZPA private application ----
+async function setKind(k) {
+  CHG.kind = k;
+  document.querySelectorAll('#chgKind button').forEach((b) => b.classList.toggle('on', b.dataset.kind === k));
+  $('chgZpaBlocks').classList.toggle('hidden', k !== 'zpa'); $('chgZiaBlocks').classList.toggle('hidden', k === 'zpa');
+  $('chgCollapse').closest('label').classList.toggle('hidden', k === 'zpa');
+  $('chgPlan').innerHTML = ''; $('chgApply').classList.add('hidden'); $('chgWriteWrap').classList.add('hidden');
+  if (k === 'zpa' && !CHG.zctx) {
+    try { CHG.zctx = await api('/api/zpa/context'); } catch (e) { $('chgMsg').innerHTML = `<span class="err">${esc(e.message)}</span>`; return; }
+    initZpa();
+  }
+}
+document.querySelectorAll('#chgKind button').forEach((b) => b.addEventListener('click', () => setKind(b.dataset.kind)));
+function initZpa() {
+  const z = CHG.zctx, B = CHG.intent === 'BLOCK';
+  const c = CHG.port;
+  $('zTcp').value = c && c.protocol === 'udp' ? '' : String((c && c.port) || 443);
+  $('zUdp').value = c && c.protocol === 'udp' ? String(c.port || '') : '';
+  $('zSegName').value = 'Sim Private App';
+  $('zSgSel').innerHTML = z.segmentGroups.map((g) => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('') || '<option value="">No segment groups: create one</option>';
+  $('zSgName').value = 'Sim Apps';
+  $('zSrv').innerHTML = z.serverGroups.map((g, i) => `<label class="chip${i === 0 ? ' on' : ''}"><input type="checkbox" value="${esc(g.id)}"${i === 0 ? ' checked' : ''}>${esc(g.name)}</label>`).join('') || '<div class="err">No server groups found. Create one in ZPA first.</div>';
+  $('zSrv').querySelectorAll('.chip').forEach((ch) => { const cb = ch.querySelector('input'); ch.addEventListener('click', (ev) => { ev.preventDefault(); cb.checked = !cb.checked; ch.classList.toggle('on', cb.checked); }); });
+  const dec = CHG.decider && CHG.decider.area === 'zpa' && CHG.decider.ruleId;
+  $('zSegSel').innerHTML = z.segments.map((a) => `<option value="${esc(a.id)}">${esc(a.name)} (${num(a.count)} destinations${a.bypassType && a.bypassType !== 'NEVER' ? ', bypass ' + esc(a.bypassType) : ''})</option>`).join('');
+  $('zRuleName').value = B ? 'Sim-Block-ZPA' : 'Sim-Allow-ZPA';
+  $('zRuleLbl').textContent = B ? 'Create a Block (DENY) access rule for this segment' : 'Create an Allow access rule for this segment';
+  $('zRulePos').innerHTML = `<option value="">Choose where this rule goes…</option><option value="TOP">Top of the access policy (order 1)</option>` + z.rules.map((r) => `<option value="${esc(r.id)}">Above #${esc(r.order)} ${esc(r.name)} (${esc(r.action)})${String(r.id) === String(dec) ? ' ← currently decides this traffic' : ''}</option>`).join('') + '<option value="BOTTOM">Bottom</option>';
+  $('zIdp').innerHTML = z.idps.length ? z.idps.map((i) => `<option value="${esc(i.id)}">${esc(i.name)}${i.scim ? '' : ' (SCIM off)'}</option>`).join('') : '<option value="">No IdPs loaded</option>';
+  $('zSamlSel').innerHTML = z.saml.length ? '<option value="">SAML attribute…</option>' + z.saml.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('') : '<option value="">No SAML attributes loaded</option>';
+  const zm = lastSim && lastSim.result && (lastSim.result.modules.find((m) => m.module === 'ZPA Access Policy') || {}).matchedSegments;
+  if (CHG.decider && CHG.decider.area === 'zpa' && zm && zm.length) { document.querySelector('input[name=zSegMode][value=existing]').checked = true; $('zSegSel').value = String(zm[0].id); }
+  syncZpaModes(); renderZWho();
+  if (Object.keys(z.errors || {}).length) $('chgMsg').innerHTML = `<span class="warn">Some ZPA data failed to load: ${esc(Object.keys(z.errors).join(', '))}</span>`;
+}
+function syncZpaModes() {
+  const seg = document.querySelector('input[name=zSegMode]:checked').value, sg = document.querySelector('input[name=zSgMode]:checked').value;
+  $('zSegNew').classList.toggle('hidden', seg !== 'new'); $('zSegExisting').classList.toggle('hidden', seg !== 'existing');
+  $('zSgSel').classList.toggle('hidden', sg !== 'existing'); $('zSgName').classList.toggle('hidden', sg !== 'new');
+  $('zRuleBox').classList.toggle('hidden', !$('zRuleOn').checked);
+}
+document.querySelectorAll('input[name=zSegMode],input[name=zSgMode]').forEach((r) => r.addEventListener('change', syncZpaModes));
+$('zRuleOn').addEventListener('change', syncZpaModes);
+function renderZWho() {
+  $('zWhoNone').classList.toggle('hidden', CHG.zwho.length > 0);
+  $('zWho').innerHTML = CHG.zwho.map((x, i) => `<span class="pill">${x.type === 'scim' ? '👥' : '🏷'} ${esc(x.type === 'scim' ? x.name : `${x.name} = ${x.value}`)}<button data-i="${i}" title="Remove">×</button></span>`).join('');
+}
+$('zWho').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; CHG.zwho.splice(+b.dataset.i, 1); renderZWho(); });
+let zTimer = null;
+$('zScimQ').addEventListener('input', () => { clearTimeout(zTimer); zTimer = setTimeout(zScim, 250); });
+$('zScimQ').addEventListener('focus', zScim);
+$('zScimQ').addEventListener('blur', () => setTimeout(() => $('zScimRes').classList.add('hidden'), 150));
+async function zScim() {
+  const idpId = $('zIdp').value; if (!idpId) return;
+  try {
+    const { results } = await api('/api/zpa/scim', { idpId, q: $('zScimQ').value.trim() });
+    $('zScimRes').innerHTML = results.length ? results.map((g) => `<div data-id="${esc(g.id)}" data-name="${esc(g.name)}">${esc(g.name)}</div>`).join('') : '<div class="form-hint">No matches</div>';
+  } catch (e) { $('zScimRes').innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+  $('zScimRes').classList.remove('hidden');
+}
+$('zScimRes').addEventListener('mousedown', (e) => {
+  const d = e.target.closest('div[data-id]'); if (!d) return;
+  if (!CHG.zwho.some((x) => x.type === 'scim' && String(x.id) === d.dataset.id)) CHG.zwho.push({ type: 'scim', idpId: $('zIdp').value, id: d.dataset.id, name: d.dataset.name });
+  renderZWho(); $('zScimQ').value = ''; $('zScimRes').classList.add('hidden');
+});
+$('zSamlAdd').onclick = () => {
+  const id = $('zSamlSel').value, v = $('zSamlVal').value.trim(); if (!id || !v) return;
+  CHG.zwho.push({ type: 'saml', id, name: $('zSamlSel').selectedOptions[0].textContent, value: v }); $('zSamlVal').value = ''; renderZWho();
+};
+function buildZpaSpec(entries) {
+  return { kind: 'zpa', intent: CHG.intent, entries, ports: { tcp: $('zTcp').value, udp: $('zUdp').value },
+    segment: { mode: document.querySelector('input[name=zSegMode]:checked').value, id: $('zSegSel').value, name: $('zSegName').value },
+    segmentGroup: { mode: document.querySelector('input[name=zSgMode]:checked').value, id: $('zSgSel').value, name: $('zSgName').value },
+    serverGroups: [...$('zSrv').querySelectorAll('input:checked')].map((x) => x.value),
+    rule: { enabled: $('zRuleOn').checked, name: $('zRuleName').value, placeAbove: $('zRulePos').value === 'BOTTOM' ? '' : $('zRulePos').value,
+      scim: CHG.zwho.filter((x) => x.type === 'scim'), saml: CHG.zwho.filter((x) => x.type === 'saml') } };
 }
 function alertMsg(m) { const t = $(mode === 'bulk' ? 'bulkMsg' : 'simMsg'); if (t) msg(t.id, m); }
 function closeChange() { $('chgModal').classList.add('hidden'); document.body.style.overflow = ''; }
@@ -1001,6 +1136,7 @@ function buildSpec() {
     const st = CHG.ruleState[ar] || {};
     rules[ar] = { enabled: !!a[ar], mode: st.mode === 'reuse' ? 'reuse' : 'new', name: st.name, placeAbove: st.place, ruleId: st.reuse, blockAction: st.fwAction };
   }
+  if (CHG.kind === 'zpa') return buildZpaSpec(entries);
   return { intent: CHG.intent, entries, collapse: $('chgCollapse').checked,
     category: { mode: cm, id: $('chgCatSel').value, name: $('chgCatName').value },
     ipGroup: { mode: gm, id: $('chgGrpSel').value, name: $('chgGrpName').value },
@@ -1008,7 +1144,8 @@ function buildSpec() {
 }
 $('chgPreview').onclick = async () => {
   const spec = buildSpec();
-  for (const ar of ['url', 'firewall', 'dns']) if (spec.rules[ar].enabled && spec.rules[ar].mode === 'new' && !spec.rules[ar].placeAbove) { $('chgMsg').innerHTML = `<span class="err">Choose a position for the ${AREA_NAME[ar]} rule.</span>`; $('rp_' + ar).focus(); return; }
+  if (spec.kind === 'zpa') { if (spec.rule.enabled && !$('zRulePos').value) { $('chgMsg').innerHTML = '<span class="err">Choose a position for the ZPA access rule.</span>'; $('zRulePos').focus(); return; } }
+  else for (const ar of ['url', 'firewall', 'dns']) if (spec.rules[ar].enabled && spec.rules[ar].mode === 'new' && !spec.rules[ar].placeAbove) { $('chgMsg').innerHTML = `<span class="err">Choose a position for the ${AREA_NAME[ar]} rule.</span>`; $('rp_' + ar).focus(); return; }
   $('chgPreview').disabled = true; $('chgMsg').innerHTML = '<span class="spinner"></span> Building preview…';
   try {
     const p = await api('/api/changes/plan', { spec });
@@ -1018,13 +1155,13 @@ $('chgPreview').onclick = async () => {
       ${p.errors.map((x) => `<div class="errline">✗ ${esc(x)}</div>`).join('')}${p.warnings.map((x) => `<div class="warn">⚠ ${esc(x)}</div>`).join('')}
       <ul style="margin:6px 0 4px 18px;font-size:14px">${p.summary.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
       ${p.errors.length ? '' : p.steps.map((st, i) => `<div class="plan-step"><b>${i + 1}.</b> ${esc(st.title)}<details><summary class="mono">${esc(st.method)} ${esc(st.path)}</summary><pre>${esc(JSON.stringify(st.body, null, 1))}</pre></details></div>`).join('')}
-      ${p.steps.length ? `<div class="form-hint" style="margin-top:8px">${p.mock ? 'Sample mode: applied to the in-memory policy so you can re-simulate.' : 'Saved changes are not live until activated. You can undo this change from Policy changes.'}</div>` : ''}</div>`;
+      ${p.steps.length ? `<div class="form-hint" style="margin-top:8px">${p.mock ? 'Sample mode: applied to the in-memory policy so you can re-simulate.' : p.kind === 'zpa' ? 'ZPA changes take effect as soon as they are saved (no activation). You can undo this change from Policy changes.' : 'Saved changes are not live until activated. You can undo this change from Policy changes.'}</div>` : ''}</div>`;
     const ok = !p.errors.length && p.steps.length;
     $('chgApply').classList.toggle('hidden', !ok);
     $('chgWriteWrap').classList.toggle('hidden', !ok || p.writeEnabled);
     $('chgWrite').checked = !!p.writeEnabled;
     $('chgWriteLbl').textContent = p.mock ? 'Allow changes to the sample policy for this session' : `Allow policy changes in ${p.tenant} for this session`;
-    $('chgApply').textContent = p.mock ? `Apply ${p.steps.length} step${p.steps.length === 1 ? '' : 's'} to sample policy` : `Save ${p.steps.length} step${p.steps.length === 1 ? '' : 's'} to ZIA`;
+    $('chgApply').textContent = p.mock ? `Apply ${p.steps.length} step${p.steps.length === 1 ? '' : 's'} to sample policy` : `Save ${p.steps.length} step${p.steps.length === 1 ? '' : 's'} to ${p.kind === 'zpa' ? 'ZPA' : 'ZIA'}`;
     $('chgApply').disabled = !p.writeEnabled;
     $('chgMsg').textContent = '';
     $('chgPlan').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1043,7 +1180,7 @@ $('chgApply').onclick = async () => {
     const r = await api('/api/changes/apply', { planId: CHG.plan.id, confirm: true });
     const e = r.entry;
     $('chgForm').querySelectorAll('input,select,textarea,button').forEach((x) => { if (!x.closest('#chgPlan')) x.disabled = true; });
-    $('chgPlan').innerHTML = `<div class="step-blk" style="border-color:${e.failed ? 'var(--accent-red)' : 'var(--accent-green)'}"><div class="t">${e.failed ? 'Stopped on an error' : r.mock ? 'Applied to the sample policy' : 'Saved to ZIA'}</div>
+    $('chgPlan').innerHTML = `<div class="step-blk" style="border-color:${e.failed ? 'var(--accent-red)' : 'var(--accent-green)'}"><div class="t">${e.failed ? 'Stopped on an error' : r.mock ? 'Applied to the sample policy' : CHG.kind === 'zpa' ? 'Saved to ZPA' : 'Saved to ZIA'}</div>
       ${e.done.map((d) => `<div class="plan-step done">✓ ${esc(d.title)}</div>`).join('')}
       ${e.failed ? `<div class="plan-step fail">✗ ${esc(e.failed.title)}<div class="errline">${esc(e.failed.error)}</div></div><div class="msg">Steps after this one were not run. Undo removes the ${e.done.length} completed step(s).</div>` : ''}
       <div class="btn-group">${r.activation === 'PENDING' ? '<button class="btn btn-success btn-sm" id="chgActivate">Activate now</button>' : ''}<button class="btn btn-ghost btn-sm" id="chgUndo">Undo this change</button>${CHG.source === 'single' ? '<button class="btn btn-ghost btn-sm" id="chgResim">Re-run the simulation</button>' : ''}<button class="btn btn-ghost btn-sm" id="chgDone">Close</button></div>

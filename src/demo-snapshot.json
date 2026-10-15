@@ -413,13 +413,89 @@
     "11112"
    ],
    "segmentGroupId": "500",
-   "enabled": true
+   "enabled": true,
+   "bypassType": "NEVER",
+   "serverGroups": [
+    {
+     "id": "7001",
+     "name": "Imaging Connectors"
+    }
+   ]
+  },
+  {
+   "id": "9002",
+   "name": "Intranet",
+   "domainNames": [
+    "intranet.hospital.example",
+    "10.50.0.0/16"
+   ],
+   "tcpPortRanges": [
+    "443",
+    "443",
+    "80",
+    "80"
+   ],
+   "segmentGroupId": "501",
+   "enabled": true,
+   "bypassType": "ON_NET",
+   "serverGroups": [
+    {
+     "id": "7002",
+     "name": "Core Connectors"
+    }
+   ]
+  },
+  {
+   "id": "9003",
+   "name": "Public Portal (bypass)",
+   "domainNames": [
+    "portal.hospital.example"
+   ],
+   "tcpPortRanges": [
+    "443",
+    "443"
+   ],
+   "segmentGroupId": "501",
+   "enabled": true,
+   "bypassType": "ALWAYS",
+   "serverGroups": [
+    {
+     "id": "7002",
+     "name": "Core Connectors"
+    }
+   ]
+  },
+  {
+   "id": "9004",
+   "name": "Lab Systems",
+   "domainNames": [
+    "lab.hospital.example"
+   ],
+   "tcpPortRanges": [
+    "443",
+    "443"
+   ],
+   "segmentGroupId": "501",
+   "enabled": true,
+   "bypassType": "NEVER",
+   "serverGroups": [
+    {
+     "id": "7002",
+     "name": "Core Connectors"
+    }
+   ]
   }
  ],
  "zpaSegmentGroups": [
   {
    "id": "500",
-   "name": "Imaging"
+   "name": "Imaging",
+   "enabled": true
+  },
+  {
+   "id": "501",
+   "name": "Corporate Apps",
+   "enabled": true
   }
  ],
  "zpaAccessRules": [
@@ -451,6 +527,25 @@
      ]
     }
    ]
+  },
+  {
+   "id": "8002",
+   "name": "Allow Intranet",
+   "ruleOrder": "2",
+   "action": "ALLOW",
+   "conditions": [
+    {
+     "operator": "OR",
+     "operands": [
+      {
+       "objectType": "APP",
+       "values": [
+        "9002"
+       ]
+      }
+     ]
+    }
+   ]
   }
  ],
  "zccAppServices": [
@@ -459,6 +554,115 @@
    "appName": "Microsoft Teams",
    "ips": [
     "52.112.0.0/14"
+   ]
+  }
+ ],
+ "zpaForwardingRules": [
+  {
+   "id": "8101",
+   "name": "Bypass Lab Systems",
+   "ruleOrder": "1",
+   "action": "BYPASS",
+   "conditions": [
+    {
+     "operator": "OR",
+     "operands": [
+      {
+       "objectType": "APP",
+       "values": [
+        "9004"
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "8102",
+   "name": "Intercept everything else",
+   "ruleOrder": "2",
+   "action": "INTERCEPT",
+   "conditions": []
+  }
+ ],
+ "zpaServerGroups": [
+  {
+   "id": "7001",
+   "name": "Imaging Connectors",
+   "enabled": true
+  },
+  {
+   "id": "7002",
+   "name": "Core Connectors",
+   "enabled": true
+  }
+ ],
+ "zpaAccessPolicySet": {
+  "id": "6001",
+  "name": "Global_Policy",
+  "policyType": "1"
+ },
+ "zpaIdps": [
+  {
+   "id": "123",
+   "name": "Entra ID",
+   "scimEnabled": true
+  }
+ ],
+ "zpaSamlAttributes": [
+  {
+   "id": "3001",
+   "name": "Department_Entra",
+   "idpId": "123",
+   "samlName": "department"
+  }
+ ],
+ "zpaScimGroups": {
+  "123": [
+   {
+    "id": "456",
+    "name": "Radiologists"
+   },
+   {
+    "id": "457",
+    "name": "Nursing"
+   },
+   {
+    "id": "458",
+    "name": "IT Admins"
+   }
+  ]
+ },
+ "cloudAppRules": [
+  {
+   "id": 52001,
+   "ruleType": "FILE_SHARE",
+   "name": "Block Personal File Sharing",
+   "order": 1,
+   "state": "ENABLED",
+   "rank": 7,
+   "applications": [
+    "DROPBOX",
+    "WETRANSFER"
+   ],
+   "actions": [
+    "DENY_FILE_SHARE_VIEW",
+    "DENY_FILE_SHARE_UPLOAD"
+   ]
+  },
+  {
+   "id": 52002,
+   "ruleType": "AI_ML",
+   "name": "Restrict AI uploads",
+   "order": 1,
+   "state": "ENABLED",
+   "rank": 7,
+   "applications": [
+    "CHATGPT_AI"
+   ],
+   "actions": [
+    "ALLOW_AI_ML_WEB_USE",
+    "DENY_AI_ML_UPLOAD"
    ]
   }
  ]

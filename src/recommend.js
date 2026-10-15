@@ -47,6 +47,11 @@ function recommendRow(row, expected, data) {
   if (expected === 'BLOCK') {
     if (act === 'BLOCK') { out.meets = 'yes'; out.recommendation = `Already blocked by ${row.module} ${ruleRef(row.rule, row.order)}.`; return out; }
     out.meets = 'no';
+    if (act === 'BYPASS' && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(row.target || '')) {
+      out.area = 'ZPA';
+      out.recommendation = 'Private address: Client Connector keeps it on the local network, so ZIA never sees it. If it is an internal application, publish it as a ZPA private application with a DENY access rule (or allow only the right users); otherwise block it on internal firewalls or EDR.';
+      return out;
+    }
     if (act === 'BYPASS') {
       out.area = 'Client Connector';
       out.recommendation = `Bypassed by Client Connector, so ZIA never sees it. Remove it from the app profile's exclusions, VPN gateway bypass or IP-based app bypass. If the bypass must stay, block it upstream (on-prem firewall).`;

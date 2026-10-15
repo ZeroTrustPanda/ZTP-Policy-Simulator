@@ -133,7 +133,7 @@ test('recommendations: expected block / allow → best policy area', async () =>
   assert.equal(by['45.2.0.3'].category, 'MISCELLANEOUS_OR_UNKNOWN'); // from the fake lookup
   assert.equal(by['45.2.0.3'].area, 'URL Filtering'); assert.match(by['45.2.0.3'].recommendation, /Block category MISCELLANEOUS_OR_UNKNOWN/);
   assert.equal(by['bad.example.net'].area, 'URL Filtering'); assert.match(by['bad.example.net'].recommendation, /custom URL category/);
-  assert.equal(by['10.20.30.40'].area, 'Client Connector');
+  assert.equal(by['10.20.30.40'].area, 'ZPA'); // private address bypassed by Client Connector → publish via ZPA
   assert.equal(by['203.0.113.10'].meets, 'yes');
   assert.equal(by['45.2.0.4'].meets, 'no'); assert.match(by['45.2.0.4'].recommendation, /Allow rule above/);
   assert.equal(by['45.2.0.5'].area, 'ATP'); assert.match(by['45.2.0.5'].recommendation, /allowlist/);

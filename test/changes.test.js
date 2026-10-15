@@ -115,3 +115,53 @@ test('warns when a catch-all rule with the opposite action sits above the new ru
   const p2 = C.plan({ intent: 'BLOCK', entries: ['48.1.1.1'], category: { mode: 'new', name: 'Z' }, rules: { url: { enabled: true, mode: 'new', name: 'Z-Block', placeAbove: allowAll.id } } }, data);
   assert.ok(!p2.warnings.some((w) => w.includes('never apply')));
 });
+
+// ---------- 1.5.0: ZPA private application ----------
+test('ZPA: new segment + allow rule at the top → simulation shows ZPA allow; undo restores', async () => {
+  const data = fresh();
+  const before = JSON.stringify({ a: data.zpaApps, r: data.zpaAccessRules, g: data.zpaSegmentGroups });
+  const sim = () => simulate({ data }, ctx('emr.hospital.example', { useZpa: true }), {}).summary.primary;
+  assert.notEqual(sim().module, 'ZPA Access Policy');
+  const p = C.planZpa({ kind: 'zpa', intent: 'ALLOW', entries: ['emr.hospital.example', '10.60.0.0/24'], ports: { tcp: '443, 8443-8445' },
+    segment: { mode: 'new', name: 'EMR' }, segmentGroup: { mode: 'new', name: 'Clinical' }, serverGroups: ['7002'],
+    rule: { enabled: true, name: 'Allow EMR', placeAbove: 'TOP' } }, data);
+  assert.deepEqual(p.errors, []);
+  const app = p.steps.find((s) => s.path === '/application').body;
+  assert.deepEqual(app.tcpPortRanges, ['443', '443', '8443', '8445']);
+  assert.deepEqual(app.domainNames, ['emr.hospital.example', '10.60.0.0/24']);
+  assert.ok(p.steps.some((s) => /reorder\/1$/.test(s.path)));
+  const api = C.mockApi(data);
+  const entry = await C.apply(p, api);
+  assert.equal(entry.failed, null, entry.failed && entry.failed.error);
+  assert.equal(data.zpaAccessRules.find((r) => r.name === 'Allow EMR').ruleOrder, '1');
+  const v = sim(); assert.equal(v.module, 'ZPA Access Policy'); assert.equal(v.action, 'ALLOW');
+  await C.undo(entry, api);
+  assert.equal(entry.undone, true, JSON.stringify(entry.undoResults));
+  assert.equal(JSON.stringify({ a: data.zpaApps, r: data.zpaAccessRules, g: data.zpaSegmentGroups }), before);
+});
+
+test('ZPA: block via DENY rule with SCIM and SAML conditions on an existing segment', async () => {
+  const data = fresh();
+  const p = C.planZpa({ kind: 'zpa', intent: 'BLOCK', entries: ['pacs2.hospital.example'], segment: { mode: 'existing', id: '9001' },
+    rule: { enabled: true, name: 'Deny Nursing PACS', placeAbove: '8001', scim: [{ idpId: '123', id: '457', name: 'Nursing' }], saml: [{ id: '3001', name: 'Department_Entra', value: 'Nursing' }] } }, data);
+  assert.deepEqual(p.errors, []);
+  const rule = p.steps.find((s) => /\/rule$/.test(s.path)).body;
+  assert.equal(rule.action, 'DENY');
+  assert.equal(rule.conditions.length, 3);
+  assert.deepEqual(rule.conditions[1].operands[0], { objectType: 'SCIM_GROUP', lhs: '123', rhs: '457' });
+  assert.equal(rule.conditions[0].operands[0].rhs, '9001');
+  const entry = await C.apply(p, C.mockApi(data));
+  assert.equal(entry.failed, null);
+  assert.ok(data.zpaApps.find((a) => a.id === '9001').domainNames.includes('pacs2.hospital.example'));
+  assert.equal(data.zpaAccessRules.find((r) => r.name === 'Deny Nursing PACS').ruleOrder, '1');
+});
+
+test('ZPA: validation refuses missing server group, bad ports and duplicate names', () => {
+  const data = fresh();
+  const p = C.planZpa({ kind: 'zpa', intent: 'ALLOW', entries: ['x.example'], ports: { tcp: '99999' }, segment: { mode: 'new', name: 'Radiology PACS' }, segmentGroup: { mode: 'existing', id: '500' } }, data);
+  assert.ok(p.errors.some((e) => /Ports/.test(e)));
+  const p2 = C.planZpa({ kind: 'zpa', intent: 'ALLOW', entries: ['x.example'], ports: { tcp: '443' }, segment: { mode: 'new', name: 'Radiology PACS' }, segmentGroup: { mode: 'existing', id: '500' } }, data);
+  assert.ok(p2.errors.some((e) => /already exists/.test(e)));
+  const p3 = C.planZpa({ kind: 'zpa', intent: 'ALLOW', entries: ['x.example'], ports: { tcp: '443' }, segment: { mode: 'new', name: 'New One' }, segmentGroup: { mode: 'existing', id: '500' }, serverGroups: [] }, data);
+  assert.ok(p3.errors.some((e) => /server group/.test(e)));
+});

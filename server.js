@@ -125,6 +125,7 @@ async function buildContext(s, b) {
     user: b.user || null, groups: b.groups || [], department: b.department || null,
     location: b.location || null, locationGroups: b.locationGroups || [], sourceIp: b.sourceIp || null, destCountry: b.destCountry || null,
     resolvedIps: [], categories: [], notes: [],
+    useZpa: b.useZpa !== false, cloudApp: b.cloudApp || null,
   };
   if (b.ip) {
     if (!t) ctx.target = M.parseTarget(b.ip);
@@ -149,6 +150,7 @@ async function buildContext(s, b) {
         const c = s.catCache.get(key);
         ctx.categories = [...c.categories, ...c.security];
         ctx.securityCategories = c.security;
+        if (c.application && !ctx.cloudApp) ctx.cloudApp = c.application;
         ctx.categorySource = 'Zscaler lookup';
         if (tg.isWildcard) ctx.notes.push(`Wildcard query: categories taken from probe host ${key}.`);
         if (c.error) ctx.notes.push(`Zscaler returned no category for ${key}.`);
@@ -190,7 +192,7 @@ app.post('/api/bulk/start', wrap(async (req, res) => {
   const ex = bulk.expand(parsed.entries);
   if (ex.error) return res.status(400).json({ error: ex.error });
   if (!ex.rows.length) return res.status(400).json({ error: 'Nothing valid to test.', skipped: [...parsed.skipped, ...ex.skipped].slice(0, 20) });
-  const opts = { lookup: b.lookup !== false && !!s.client, defaultPort: b.defaultPort || '', defaultProtocol: b.defaultProtocol || 'tcp', expected: recommend.normExpected(b.expected) };
+  const opts = { lookup: b.lookup !== false && !!s.client, defaultPort: b.defaultPort || '', defaultProtocol: b.defaultProtocol || 'tcp', expected: recommend.normExpected(b.expected), useZpa: b.useZpa !== false };
   const skipped = [...parsed.skipped, ...ex.skipped];
   const job = {
     id: crypto.randomBytes(6).toString('hex'), phase: 'queued', total: ex.rows.length, done: 0, results: [], started: Date.now(), name: String(b.fileName || 'bulk').replace(/\.[^.]+$/, ''),
@@ -345,10 +347,41 @@ app.post('/api/bulk/select', (req, res) => {
 app.post('/api/changes/plan', (req, res) => {
   const s = getSession(req, res); if (!s) return;
   if (!s.snap) return res.status(409).json({ error: 'Load policies first.' });
-  const p = changes.plan(req.body.spec || {}, s.snap.data);
+  const spec = req.body.spec || {};
+  const p = spec.kind === 'zpa' ? changes.planZpa(spec, s.snap.data) : changes.plan(spec, s.snap.data);
   s.plans = s.plans || new Map(); s.plans.set(p.id, p);
-  res.json(Object.assign({}, p, { entries: undefined, steps: p.steps.map((st) => ({ title: st.title, method: st.method, path: '/zia/api/v1' + st.path, body: previewBody(st.body) })), tenant: tenantOf(s), mock: !!s.demo, writeEnabled: !!s.writeEnabled }));
+  res.json(Object.assign({}, p, { entries: undefined, steps: p.steps.map((st) => ({ title: st.title, method: st.method, path: (st.api === 'zpa' ? `/zpa/mgmtconfig/v1/admin/customers/${(s.client && s.client.cfg.zpaCustomerId) || '{customerId}'}` : '/zia/api/v1') + st.path, body: previewBody(st.body) })), tenant: tenantOf(s), mock: !!s.demo, writeEnabled: !!s.writeEnabled }));
 });
+
+// ZPA context for the "private application" change: segments, groups, server groups, access rules, IdPs, SAML attributes.
+app.post('/api/zpa/context', (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  const d = (s.snap && s.snap.data) || {}, arr = (x) => (Array.isArray(x) ? x : []);
+  if (!d.zpaApps && !d.zpaAccessRules) return res.status(409).json({ error: 'ZPA policy is not loaded. Add a ZPA customer ID, tick ZPA and reload policies.' });
+  res.json({
+    segments: arr(d.zpaApps).map((a) => ({ id: a.id, name: a.name, count: arr(a.domainNames).length, segmentGroupId: a.segmentGroupId, bypassType: a.bypassType })),
+    segmentGroups: arr(d.zpaSegmentGroups).map((g) => ({ id: g.id, name: g.name })),
+    serverGroups: arr(d.zpaServerGroups).map((g) => ({ id: g.id, name: g.name })),
+    rules: arr(d.zpaAccessRules).map((r) => ({ id: r.id, name: r.name, order: r.ruleOrder != null ? +r.ruleOrder : r.order, action: r.action })).sort((a, b) => a.order - b.order),
+    idps: arr(d.zpaIdps).map((i) => ({ id: i.id, name: i.name, scim: !!(i.scimEnabled || i.enableScimBasedPolicy) })),
+    saml: arr(d.zpaSamlAttributes).map((a) => ({ id: a.id, name: a.name, idpId: a.idpId })),
+    policySet: !!(d.zpaAccessPolicySet && (d.zpaAccessPolicySet.id || (Array.isArray(d.zpaAccessPolicySet) && d.zpaAccessPolicySet.length))),
+    errors: Object.fromEntries(Object.entries(s.snap.errors || {}).filter(([k]) => k.startsWith('zpa'))),
+  });
+});
+
+app.post('/api/zpa/scim', wrap(async (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  const idp = String(req.body.idpId || ''), q = String(req.body.q || '').trim().toLowerCase();
+  let list = [];
+  if (s.demo || !s.client) list = ((s.snap.data.zpaScimGroups || {})[idp] || []);
+  else {
+    const out = await s.client.get(`/zpa/userconfig/v1/customers/${s.client.cfg.zpaCustomerId}/scimgroup/idpId/${encodeURIComponent(idp)}`, Object.assign({ pagesize: '100' }, q ? { search: q } : {}));
+    list = (Array.isArray(out) ? out : (out && out.list) || []).map((g) => ({ id: g.id, name: g.name }));
+  }
+  if (q) list = list.filter((g) => String(g.name).toLowerCase().includes(q));
+  res.json({ results: list.slice(0, 50) });
+}));
 
 app.post('/api/changes/apply', wrap(async (req, res) => {
   const s = getSession(req, res); if (!s) return;

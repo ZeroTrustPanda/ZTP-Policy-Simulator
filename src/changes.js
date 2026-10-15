@@ -248,6 +248,109 @@ function plan(spec, data) {
     steps, summary, warnings, errors, refreshKeys: [...new Set(steps.map((s) => ({ category: 'customUrlCategories', group: 'ipDestinationGroups', url: 'urlFilteringRules', firewall: 'firewallRules', dns: 'dnsRules', atp: intent === 'BLOCK' ? 'atpMaliciousUrls' : 'atpSecurityExceptions' }[s.area])))] };
 }
 
+// ---------- ZPA private application ----------
+// spec: { intent, entries, collapse, ports: { tcp, udp }, segment: { mode, id, name }, segmentGroup: { mode, id, name },
+//         serverGroups: [id], rule: { enabled, name, placeAbove, scim: [{ idpId, id, name }], saml: [{ id, name, value }] } }
+function portPairs(s) {
+  const out = [];
+  for (const part of String(s || '').split(/[\s,]+/).filter(Boolean)) {
+    const m = part.match(/^(\d{1,5})(?:-(\d{1,5}))?$/);
+    if (!m || +m[1] > 65535 || (m[2] && +m[2] > 65535)) return null;
+    out.push(m[1], m[2] || m[1]);
+  }
+  return out;
+}
+function planZpa(spec, data) {
+  const intent = spec.intent === 'ALLOW' ? 'ALLOW' : 'BLOCK';
+  const e = normalizeEntries(spec.entries || [], { collapse: spec.collapse !== false });
+  const errors = [], warnings = [], steps = [], summary = [];
+  const dests = [...e.hosts.map((h) => h.split('/')[0]), ...e.ips, ...e.cidrs];
+  if (!dests.length) errors.push('No valid destinations to add.');
+  if (e.invalid.length) warnings.push(`${e.invalid.length} entr${e.invalid.length === 1 ? 'y is' : 'ies are'} not valid and will be skipped.`);
+  const tcp = portPairs(spec.ports && spec.ports.tcp), udp = portPairs(spec.ports && spec.ports.udp);
+  if (tcp === null || udp === null) errors.push('Ports must be numbers or ranges such as 443, 8080-8090.');
+  const apps = arr(data.zpaApps), segGroups = arr(data.zpaSegmentGroups), srvGroups = arr(data.zpaServerGroups);
+  const stamp = new Date().toISOString().slice(0, 10);
+  const desc = `Managed by ZeroTrustPanda ZS Policy Simulator (${stamp})`;
+  let appRef = null, segName = '';
+  const sg = spec.segment || {};
+  if (!errors.length && sg.mode === 'existing') {
+    const app = apps.find((a) => String(a.id) === String(sg.id));
+    if (!app) errors.push('Pick an existing application segment, or create a new one.');
+    else {
+      appRef = app.id; segName = app.name;
+      const have = new Set(arr(app.domainNames).map(lc));
+      const add = dests.filter((d) => !have.has(lc(d)));
+      if (add.length) {
+        steps.push({ api: 'zpa', area: 'zpaApp', title: `Add ${add.length} destination${add.length === 1 ? '' : 's'} to application segment "${app.name}"`, method: 'PUT', path: `/application/${app.id}`,
+          body: Object.assign({}, app, { domainNames: [...arr(app.domainNames), ...add] }), undo: { method: 'PUT', path: `/application/${app.id}`, body: app, title: `Restore application segment "${app.name}"` } });
+        summary.push(`ZPA: add ${add.length} destinations to application segment "${app.name}".`);
+      } else summary.push(`ZPA: application segment "${app.name}" already contains every destination.`);
+    }
+  } else if (!errors.length) {
+    segName = String(sg.name || '').trim();
+    if (!segName) errors.push('Name the new application segment.');
+    else if (apps.some((a) => lc(a.name) === lc(segName))) errors.push(`An application segment named "${segName}" already exists. Pick it as an existing segment instead.`);
+    if (!tcp.length && !udp.length) errors.push('Enter at least one TCP or UDP port for the new segment.');
+    const grp = spec.segmentGroup || {};
+    let groupRef = null;
+    if (grp.mode === 'new') {
+      const gname = String(grp.name || '').trim();
+      if (!gname) errors.push('Name the new segment group.');
+      else if (segGroups.some((x) => lc(x.name) === lc(gname))) errors.push(`A segment group named "${gname}" already exists.`);
+      else if (!errors.length) {
+        groupRef = ref('segGroup');
+        steps.push({ api: 'zpa', area: 'zpaGroup', title: `Create segment group "${gname}"`, method: 'POST', path: '/segmentGroup', body: { name: gname, enabled: true, description: desc }, capture: 'segGroup',
+          undo: { method: 'DELETE', path: `/segmentGroup/${ref('segGroup')}`, title: `Delete segment group "${gname}"` } });
+        summary.push(`ZPA: create segment group "${gname}".`);
+      }
+    } else {
+      const g = segGroups.find((x) => String(x.id) === String(grp.id));
+      if (!g) errors.push('Pick a segment group for the new segment.'); else groupRef = g.id;
+    }
+    const sgs = arr(spec.serverGroups).map(String).filter((id) => srvGroups.some((x) => String(x.id) === id));
+    if (!sgs.length) errors.push('Pick at least one server group (the App Connectors that reach this application).');
+    if (!errors.length) {
+      appRef = ref('app');
+      steps.push({ api: 'zpa', area: 'zpaApp', title: `Create application segment "${segName}" with ${dests.length} destination${dests.length === 1 ? '' : 's'}`, method: 'POST', path: '/application',
+        body: { name: segName, description: desc, enabled: true, domainNames: dests, segmentGroupId: groupRef, serverGroups: sgs.map((id) => ({ id })), tcpPortRanges: tcp, udpPortRanges: udp,
+          bypassType: 'NEVER', healthReporting: 'ON_ACCESS', icmpAccessType: 'NONE', isCnameEnabled: true, ipAnchored: false, doubleEncrypt: false },
+        capture: 'app', undo: { method: 'DELETE', path: `/application/${ref('app')}`, title: `Delete application segment "${segName}"` } });
+      const gName = grp.mode === 'new' ? String(grp.name).trim() : (segGroups.find((x) => String(x.id) === String(grp.id)) || {}).name;
+      summary.push(`ZPA: create application segment "${segName}" (${dests.length} destination${dests.length === 1 ? '' : 's'}; TCP ${tcp.length ? spec.ports.tcp : 'none'}${udp.length ? `; UDP ${spec.ports.udp}` : ''}) in segment group "${gName}", served by ${sgs.map((id) => (srvGroups.find((x) => String(x.id) === id) || {}).name || id).join(', ')}.`);
+    }
+  }
+  // Access policy rule
+  const r = spec.rule || {};
+  if (r.enabled && !errors.length) {
+    const ps = data.zpaAccessPolicySet && (data.zpaAccessPolicySet.id || (Array.isArray(data.zpaAccessPolicySet) && data.zpaAccessPolicySet[0] && data.zpaAccessPolicySet[0].id));
+    const rules = arr(data.zpaAccessRules).map((x) => Object.assign({ order: x.ruleOrder != null ? +x.ruleOrder : +x.order }, x));
+    const name = String(r.name || '').trim();
+    if (!ps) errors.push('ZPA access policy set not loaded. Reload policies with ZPA ticked.');
+    else if (!name) errors.push('Name the ZPA access rule.');
+    else if (rules.some((x) => lc(x.name) === lc(name))) errors.push(`A ZPA access rule named "${name}" already exists.`);
+    else {
+      const conditions = [{ operator: 'OR', operands: [{ objectType: 'APP', lhs: 'id', rhs: appRef }] }];
+      const scim = arr(r.scim), saml = arr(r.saml).filter((x) => x.id && String(x.value || '').trim());
+      if (scim.length) conditions.push({ operator: 'OR', operands: scim.map((g) => ({ objectType: 'SCIM_GROUP', lhs: String(g.idpId), rhs: String(g.id) })) });
+      if (saml.length) conditions.push({ operator: 'OR', operands: saml.map((a) => ({ objectType: 'SAML', lhs: String(a.id), rhs: String(a.value).trim() })) });
+      const action = intent === 'ALLOW' ? 'ALLOW' : 'DENY';
+      const above = rules.find((x) => String(x.id) === String(r.placeAbove));
+      const order = r.placeAbove === 'TOP' ? 1 : above ? above.order : null;
+      steps.push({ api: 'zpa', area: 'zpaRule', title: `Create ZPA access rule "${name}" (${action})`, method: 'POST', path: `/policySet/${ps}/rule`,
+        body: { name, description: desc, action, operator: 'AND', conditions }, capture: 'zrule',
+        undo: { method: 'DELETE', path: `/policySet/${ps}/rule/${ref('zrule')}`, title: `Delete ZPA access rule "${name}"` } });
+      if (order) steps.push({ api: 'zpa', area: 'zpaRule', title: `Move ZPA access rule "${name}" to order ${order}${above ? ` (above "${above.name}")` : ''}`, method: 'PUT', path: `/policySet/${ps}/rule/${ref('zrule')}/reorder/${order}`, body: null });
+      const who = [...scim.map((g) => `SCIM group ${g.name}`), ...saml.map((a) => `${a.name} = ${a.value}`)].join(', ') || 'everyone';
+      summary.push(`ZPA: ${action} access rule "${name}" for the segment, ${order ? (above ? `above "${above.name}" (order ${order})` : 'at the top (order 1)') : 'at the bottom'}, for ${who}.`);
+      if (!r.placeAbove) warnings.push('No position chosen: the rule is added at the bottom of the access policy, below any rule that already matches.');
+    }
+  }
+  if (!errors.length && !steps.length) warnings.push('Nothing to change: everything is already in place.');
+  return { id: crypto.randomBytes(6).toString('hex'), intent, kind: 'zpa', created: Date.now(), entries: e, counts: { ips: e.ips.length, cidrs: e.cidrs.length, hosts: e.hosts.length, addresses: e.addresses, invalid: e.invalid.length },
+    steps, summary, warnings, errors, refreshKeys: ['zpaApps', 'zpaSegmentGroups', 'zpaAccessRules'] };
+}
+
 // ---------- apply / undo ----------
 function subst(v, refs) {
   if (v == null) return v;
@@ -263,10 +366,10 @@ async function apply(p, api) {
   for (const st of p.steps) {
     const path = subst(st.path, refs), body = subst(st.body, refs);
     try {
-      const out = await api.request(st.method, path, body);
+      const out = await api.request(st.method, path, body, st.api);
       if (st.capture) refs[st.capture] = out && out.id !== undefined ? out.id : undefined;
       if (st.capture && refs[st.capture] === undefined) throw new Error('ZIA did not return an id for the new object.');
-      done.push({ title: st.title, method: st.method, path, undo: subst(st.undo, refs) });
+      done.push({ title: st.title, method: st.method, path, api: st.api, undo: subst(st.undo, refs) && Object.assign(subst(st.undo, refs), { api: st.api }) });
     } catch (e) { failed = { title: st.title, error: e.message }; break; }
   }
   return { id: p.id, at: Date.now(), intent: p.intent, summary: p.summary, done, failed, refs, undone: false, refreshKeys: p.refreshKeys };
@@ -276,7 +379,7 @@ async function undo(entry, api) {
   const results = [];
   for (const d of entry.done.slice().reverse()) {
     if (!d.undo) continue;
-    try { await api.request(d.undo.method, d.undo.path, d.undo.body); results.push({ title: d.undo.title, ok: true }); }
+    try { await api.request(d.undo.method, d.undo.path, d.undo.body, d.undo.api); results.push({ title: d.undo.title, ok: true }); }
     catch (e) { results.push({ title: d.undo.title, ok: false, error: e.message }); }
   }
   entry.undone = results.every((r) => r.ok);
@@ -287,7 +390,8 @@ async function undo(entry, api) {
 // ---------- API adapters ----------
 const ZIA = '/zia/api/v1';
 function realApi(client) {
-  return { request: (method, path, body) => client.request(method, ZIA + path, { body: body == null ? undefined : body, rateRetries: 5 }) };
+  const zpa = () => `/zpa/mgmtconfig/v1/admin/customers/${client.cfg.zpaCustomerId}`;
+  return { request: (method, path, body, which) => client.request(method, (which === 'zpa' ? zpa() : ZIA) + path, { body: body == null ? undefined : body, rateRetries: 5 }) };
 }
 
 // In-memory ZIA for sample / offline sessions and tests: applies the same calls to the snapshot data and checks the
@@ -308,9 +412,36 @@ function mockApi(data) {
     for (const x of list) if (!x.defaultRule && +x.order > +r.order) x.order = +x.order - 1;
   };
   const dirty = () => { data.__status = 'PENDING'; };
+  // ZPA: changes apply immediately (no activation).
+  const zpaMock = (method, seg, body) => {
+    const nf = () => Object.assign(new Error('HTTP 404: not found'), { status: 404 });
+    if (seg[0] === 'application') {
+      const list = data.zpaApps = arr(data.zpaApps);
+      if (method === 'POST') { need(body, ['name', 'segmentGroupId']); if (!arr(body.domainNames).length) throw new Error('HTTP 400: domainNames required'); if (!arr(body.serverGroups).length) throw new Error('HTTP 400: serverGroups required'); const a = Object.assign({ id: String(nextId++) }, body); list.push(a); return a; }
+      const a = list.find((x) => String(x.id) === seg[1]); if (!a) throw nf();
+      if (method === 'PUT') { Object.keys(a).forEach((k) => delete a[k]); Object.assign(a, body, { id: seg[1] }); return null; }
+      if (method === 'DELETE') { list.splice(list.indexOf(a), 1); return null; }
+    }
+    if (seg[0] === 'segmentGroup') {
+      const list = data.zpaSegmentGroups = arr(data.zpaSegmentGroups);
+      if (method === 'POST') { need(body, ['name']); const g = Object.assign({ id: String(nextId++) }, body); list.push(g); return g; }
+      const g = list.find((x) => String(x.id) === seg[1]); if (!g) throw nf();
+      if (method === 'DELETE') { if (arr(data.zpaApps).some((a) => String(a.segmentGroupId) === seg[1])) throw new Error('HTTP 400: segment group in use'); list.splice(list.indexOf(g), 1); return null; }
+    }
+    if (seg[0] === 'policySet' && seg[2] === 'rule') {
+      const list = data.zpaAccessRules = arr(data.zpaAccessRules);
+      const renum = () => list.sort((x, y) => +x.ruleOrder - +y.ruleOrder).forEach((x, i) => { x.ruleOrder = String(i + 1); });
+      if (method === 'POST' && !seg[3]) { need(body, ['name', 'action']); for (const c of arr(body.conditions)) for (const o of arr(c.operands)) if (o.rhs == null || o.rhs === '') throw new Error('HTTP 400: operand rhs required'); const r = Object.assign({ id: String(nextId++), ruleOrder: String(list.length + 1) }, body); list.push(r); return r; }
+      const r = list.find((x) => String(x.id) === seg[3]); if (!r) throw nf();
+      if (method === 'PUT' && seg[4] === 'reorder') { r.ruleOrder = String(+seg[5] - 0.5); renum(); return null; }
+      if (method === 'DELETE') { list.splice(list.indexOf(r), 1); renum(); return null; }
+    }
+    throw Object.assign(new Error(`HTTP 400: mock ZPA API does not support ${method} /${seg.join('/')}`), { status: 400 });
+  };
   return {
     mock: true,
-    async request(method, path, body) {
+    async request(method, path, body, which) {
+      if (which === 'zpa') { const seg = path.split('?')[0].split('/').filter(Boolean); return zpaMock(method, seg, body); }
       const [p, q] = path.split('?');
       const seg = p.split('/').filter(Boolean);
       const action = q && new URLSearchParams(q).get('action');
@@ -359,6 +490,7 @@ function mockApi(data) {
       }
       if (p === '/security' && method === 'PUT') { data.atpSecurityExceptions = { whitelistUrls: arr(body && body.whitelistUrls) }; dirty(); return data.atpSecurityExceptions; }
       if (['groups', 'departments', 'users'].includes(seg[0]) && method === 'GET') return [];
+      if (which === 'zpa') return zpaMock(method, seg, body);
       throw Object.assign(new Error(`HTTP 400: mock API does not support ${method} ${path}`), { status: 400 });
     },
   };
@@ -374,4 +506,4 @@ function reusableRules(data, area, intent, { categoryId, groupId } = {}) {
   return list.filter((r) => has(r.urlCategories) || has(r.destIpCategories) || has(r.resCategories));
 }
 
-module.exports = { plan, apply, undo, realApi, mockApi, normalizeEntries, rangeToCidrs, reusableRules, placeOrder, GROUP_MAX, NAME_MAX, AREA_LABEL, RULE_KEY };
+module.exports = { plan, planZpa, portPairs, apply, undo, realApi, mockApi, normalizeEntries, rangeToCidrs, reusableRules, placeOrder, GROUP_MAX, NAME_MAX, AREA_LABEL, RULE_KEY };

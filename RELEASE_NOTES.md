@@ -1,4 +1,4 @@
-# ZeroTrustPanda ZS Policy Simulator v1.4.0
+# ZeroTrustPanda ZS Policy Simulator v1.5.0
 
 **Would this be allowed, blocked or bypassed — and by what?** A standalone simulator that pulls your live Zscaler policy over OneAPI and evaluates a transaction across ZIA, ZPA and Client Connector the way the cloud would, in rule order, then shows the deciding rule and everything else that could change the outcome.
 
@@ -7,12 +7,12 @@ Companion to the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustP
 ## Downloads
 | Platform | File |
 |---|---|
-| Windows x64 | [ZTP-Policy-Simulator-1.4.0-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.4.0/ZTP-Policy-Simulator-1.4.0-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
-| macOS Apple Silicon | [ZTP-Policy-Simulator-1.4.0-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.4.0/ZTP-Policy-Simulator-1.4.0-macos-arm64.zip) |
-| macOS Intel | [ZTP-Policy-Simulator-1.4.0-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.4.0/ZTP-Policy-Simulator-1.4.0-macos-x64.zip) |
+| Windows x64 | [ZTP-Policy-Simulator-1.5.0-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.5.0/ZTP-Policy-Simulator-1.5.0-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
+| macOS Apple Silicon | [ZTP-Policy-Simulator-1.5.0-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.5.0/ZTP-Policy-Simulator-1.5.0-macos-arm64.zip) |
+| macOS Intel | [ZTP-Policy-Simulator-1.5.0-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.5.0/ZTP-Policy-Simulator-1.5.0-macos-x64.zip) |
 | Source | clone the repo, or GitHub's "Source code" download on the release |
 
-Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.4.0/SHA256SUMS.txt)
+Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.5.0/SHA256SUMS.txt)
 
 No install, no Node.js required. Run it and it opens `http://127.0.0.1:8787`.
 macOS builds are unsigned — before first run: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`.
@@ -71,6 +71,32 @@ The simulator can now fix what it finds. It is **read-only until you switch on "
 - **Sample and offline sessions** apply changes to the in-memory policy only, so you can rehearse a change and re-simulate before touching a tenant.
 - **API client:** needs ZIA read/write scope in ZIdentity for changes. Payloads follow the ZeroTrustPanda Policy Wizard's verified templates, and the block workflow has been tested end to end on a live ZIA tenant. If ZIA rejects a call, the result names the call and ZIA's error, and undo reverts the steps that ran.
 
+### Evaluation order (new in 1.5.0)
+The simulator follows the path a transaction takes:
+
+1. **ZPA first.** If the destination (and port) matches an application segment, it checks the segment's **Bypass** setting (Never / On-Net / Always), then the **Client Forwarding Policy** (Intercept / Intercept Accessible / Bypass). If ZPA carries the traffic, the **Access Policy** decides, and ZIA and the internet bypasses don't apply.
+2. **Client Connector bypasses, per app profile and network type:**
+   1. Process-based bypass. This is flagged when configured but not evaluated, because it depends on the client process.
+   2. VPN gateway bypass.
+   3. ZPA segment Always-bypass and 4. ZPA client forwarding (both in step 1).
+   5. **PAC file** for web traffic on 80/443: DIRECT, sent to another proxy, or sent to Zscaler.
+   6. IP-based application bypass.
+   7. Z-Tunnel 2.0 exclusions (domain and IP).
+   8. Z-Tunnel 2.0 inclusions.
+3. **ZIA, in this order:** Advanced Threat Protection → Firewall → DNS Control → URL Filtering → **Cloud App Control** (new) → Sandbox → File Type Control → DLP. SSL Inspection is applied as a modifier: it decides whether ATP, URL Filtering, DLP and the others can see inside HTTPS.
+
+**🔒 Include ZPA** (next to the Single / Bulk switch) turns ZPA on or off for simulations. The choice is remembered and also unticks ZPA when loading policies, so tenants without ZPA are never queried. It is off and greyed out when no ZPA policy is loaded.
+
+**Cloud App Control** rules are loaded for every rule type. A rule matches when Zscaler's URL lookup names the destination's cloud application. Partial restrictions, such as allowing use but denying uploads, are shown as notes.
+
+### ZPA private application (new in 1.5.0)
+In the change wizard, switch to **🔒 Private application (ZPA)**. It is preselected when ZPA decided the result, or when allowing private (RFC 1918) addresses. Single results that Client Connector bypasses also offer **🔒 Add as a ZPA private application…**.
+- **Application segment:** create one (name, TCP/UDP ports, existing or new segment group, server groups), or add the destinations to an existing segment.
+- **Access policy rule:** Allow, or Block (DENY), at a position you choose from the live access policy. It applies to everyone (the app only), to **SCIM groups** (pick the IdP, search groups), or to **SAML attribute = value** conditions.
+- **Preview, save and undo** work the same as for ZIA. ZPA changes take effect when saved (no activation).
+- **Bulk recommendations** now point private addresses that Client Connector bypasses to ZPA.
+- **Not yet run against a live tenant:** the ZPA reads added in 1.5.0 (client forwarding policy, server groups, IdPs, SAML attributes, SCIM groups), ZPA writes (create/update segment, segment group, access rule, reorder) and Cloud App Control matching. They follow Zscaler's API reference and the SDK conventions and are tested against the in-memory ZPA. Try them on ZTH first.
+
 ### Smart defaults (always stated, always overridable)
 Port from the URL scheme (hostnames assume HTTPS/443) · network service and application from protocol+port (UDP/443 → QUIC) · request method GET, or CONNECT when not decrypted · file type from the URL path · standard DNS resolver for DNS app rules · default rules (order −1) evaluated last.
 
@@ -83,6 +109,16 @@ Port from the URL scheme (hostnames assume HTTPS/443) · network service and app
 - Zscaler offers no "evaluate this transaction" API, so evaluation is re-implemented from rule data. Time windows, user agent, device trust, risk score and source-port bypasses are flagged as unknown rather than evaluated.
 - No per-transaction log lookup: the console's transaction-log endpoints refuse API-client tokens. Use the console's Web / Firewall Insights logs for per-transaction proof.
 - ZCC field names follow the shapes verified by the Policy Wizard; report any app profile that shows "no forwarding profile linked".
+
+## Changes in 1.5.0
+- **New evaluation order:** ZPA first (segment match → segment Bypass → Client Forwarding Policy → Access Policy), then the Client Connector bypasses in order (process-based flagged, VPN gateway, PAC on 80/443, IP-based app bypass, Z-Tunnel 2.0 exclusions, then inclusions), then ZIA: ATP → Firewall → DNS → URL Filtering → Cloud App Control → Sandbox → File Type → DLP.
+- **ZPA decides when it carries the traffic:** ZIA and internet bypasses are skipped. On-Net segments and forwarding rules with user/device conditions appear under *Policy action also based on*.
+- **🔒 Include ZPA switch:** skips loading and evaluating ZPA for customers without it.
+- **Cloud App Control** rules are loaded (all 19 rule types) and evaluated by the cloud app Zscaler's lookup returns.
+- **PAC results** distinguish DIRECT, another proxy and Zscaler.
+- **ZPA private application change:** create or extend an app segment (segment group, server groups, ports) plus an Allow/Deny access rule placed where you choose, for everyone, SCIM groups or SAML attributes; preview, undo and audit log.
+- New ZPA data loaded: client forwarding policy, server groups, access policy set, IdPs, SAML attributes; ZPA lists are paged.
+- Bulk recommendations send private addresses that Client Connector bypasses to ZPA.
 
 ## Changes in 1.4.0
 - **Block it / Allow it** on any single result, and **Block / Allow selected** for bulk rows (ticked rows or a filter across the whole run).

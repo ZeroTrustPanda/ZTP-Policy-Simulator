@@ -268,7 +268,7 @@ async function runJob(session, job, rows, opts, deps) {
           target: row.target, protocol: (row.protocol || opts.defaultProtocol || 'tcp').toLowerCase(),
           port: row.port || opts.defaultPort || ((row.protocol || opts.defaultProtocol || 'tcp').toLowerCase() === 'tcp' && !/^[a-z]+:\/\//i.test(row.target) ? '443' : ''),
           sourceIp: row.sourceIp || '', location: row.location || '', destCountry: row.destCountry || '', user: row.user || '',
-          categories: [...cat.categories, ...cat.security], noLookup: true,
+          categories: [...cat.categories, ...cat.security], noLookup: true, useZpa: opts.useZpa !== false, cloudApp: cat.application || null,
         };
         const ctx = await deps.buildContext(session, body);
         const out = deps.simulate(session.snap, ctx, {});

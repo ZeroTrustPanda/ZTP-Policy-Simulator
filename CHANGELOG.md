@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.0 — 2026-10-15
+- Evaluation order: ZPA (segment match, segment bypass type, client forwarding policy, access policy) → Client Connector bypasses (process flagged, VPN gateway, PAC 80/443, IP app bypass, Tunnel 2.0 exclusions, inclusions) → ZIA (ATP, Firewall, DNS, URL, Cloud App Control, Sandbox, File Type, DLP; SSL as modifier).
+- Include ZPA switch (persisted; also controls loading). Cloud App Control module and loader (19 rule types). PAC other-proxy detection.
+- ZPA private application change: app segment create/extend, segment group, server groups, ports, access rule (Allow/Deny, placement, everyone / SCIM / SAML), undo, in-memory ZPA.
+- Loader: ZPA client forwarding policy, server groups, access policy set, IdPs, SAML attributes, SCIM group search; ZPA paging.
+- Recommendations: private bypassed addresses → ZPA.
+
 ## 1.4.0 — 2026-10-14
 - Policy changes: Block it / Allow it (single) and Block / Allow selected (bulk); wizard for URL Filtering, Firewall Filtering, DNS Control and ATP lists; create or reuse custom URL categories, destination groups (auto-split at 8,000) and rules; placement chosen from the live rule list; user/group/department/location criteria.
 - Preview of every call, shadowing and limit warnings, stop-on-error apply, undo, activation, per-tenant audit log; write mode opt-in per session; in-memory ZIA for sample/offline sessions.

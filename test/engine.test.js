@@ -295,3 +295,61 @@ test('isolate and caution are their own actions', () => {
   assert.equal(go('STREAMING_MEDIA').action, 'CAUTION');
   assert.equal(go('OTHER').action, 'ALLOW');
 });
+
+// ---------- 1.5.0: evaluation order ----------
+const demo15 = () => JSON.parse(JSON.stringify(require('../src/demo-snapshot.json')));
+const sim15 = (data, target, extra = {}) => simulate({ data }, Object.assign({ target: M.parseTarget(target), port: 443, protocol: 'tcp', categories: [], resolvedIps: [], groups: [], notes: [] }, extra), {});
+
+test('ZPA decides first: segment match + intercept → access policy, ZIA and internet bypasses skipped', () => {
+  const data = demo15();
+  data.zccPolicies.forEach((p) => { p.packetTunnelExcludeList = ['10.0.0.0/8']; });
+  const out = sim15(data, '10.50.1.20');
+  assert.equal(out.summary.primary.module, 'ZPA Access Policy');
+  assert.equal(out.summary.primary.action, 'ALLOW');
+  assert.equal(out.modules[0].module, 'ZPA Access Policy', 'ZPA is the first module');
+  assert.ok(out.summary.alsoBasedOn.some((c) => c.kind === 'zpa' && /on-net/i.test(c.condition)), 'On-Net segment bypass is a condition');
+});
+
+test('segment set to Always bypass and a client forwarding BYPASS rule hand off to ZIA', () => {
+  const data = demo15();
+  const a = sim15(data, 'portal.hospital.example');
+  assert.equal(a.modules[0].verdict, 'ZPA_BYPASS');
+  assert.notEqual(a.summary.primary.module, 'ZPA Access Policy');
+  const b = sim15(data, 'lab.hospital.example');
+  assert.equal(b.modules[0].verdict, 'ZPA_BYPASS');
+  assert.match(b.modules[0].reason, /client forwarding rule "Bypass Lab Systems"/);
+});
+
+test('ZPA toggle off: ZPA not evaluated', () => {
+  const out = sim15(demo15(), 'pacs.hospital.example', { port: 104, useZpa: false });
+  assert.equal(out.modules[0].verdict, 'N/A');
+  assert.notEqual(out.summary.primary.module, 'ZPA Access Policy');
+});
+
+test('ZIA order: ATP is evaluated before Firewall, Cloud App Control after URL Filtering', () => {
+  const out = sim15(demo15(), 'files.example.org', { categories: ['MALWARE_SITE'] });
+  const names = out.modules.map((m) => m.module);
+  assert.ok(names.indexOf('Advanced Threat Protection') < names.indexOf('Firewall'));
+  assert.ok(names.indexOf('URL Filtering') < names.indexOf('Cloud App Control'));
+  assert.ok(names.indexOf('Cloud App Control') < names.indexOf('Sandbox (Behavioral Analysis)'));
+  assert.ok(names.indexOf('Sandbox (Behavioral Analysis)') < names.indexOf('File Type Control'));
+  assert.equal(out.summary.primary.module, 'Advanced Threat Protection');
+});
+
+test('Cloud App Control: blocks by app, notes partial restrictions', () => {
+  const data = demo15();
+  const a = sim15(data, 'www.dropbox.com', { cloudApp: 'DROPBOX', categories: ['FILE_HOST'] });
+  assert.equal(a.summary.primary.module, 'Cloud App Control'); assert.equal(a.summary.primary.action, 'BLOCK');
+  const b = sim15(data, 'chat.openai.com', { cloudApp: 'CHATGPT_AI' });
+  const cac = b.modules.find((m) => m.module === 'Cloud App Control');
+  assert.equal(cac.verdict, 'ALLOW'); assert.match(cac.note, /DENY_AI_ML_UPLOAD/);
+});
+
+test('PAC to a non-Zscaler proxy is a bypass; to Zscaler it is not', () => {
+  const ZCC = require('../src/zcc');
+  const ctx = { target: M.parseTarget('app.example.com'), port: 443, resolvedIps: ['1.2.3.4'] };
+  const other = ZCC.evalPath({}, { actionType: 2, customPac: 'function FindProxyForURL(u,h){return "PROXY proxy.corp.local:8080";}' }, ctx, {}, {});
+  assert.equal(other.outcome, 'BYPASS'); assert.match(other.how, /another proxy/);
+  const zs = ZCC.evalPath({}, { actionType: 2, customPac: 'function FindProxyForURL(u,h){return "PROXY ${GATEWAY}:80; DIRECT";}' }, ctx, {}, {});
+  assert.equal(zs.outcome, 'ZIA');
+});

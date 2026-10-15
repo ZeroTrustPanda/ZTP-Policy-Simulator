@@ -153,11 +153,14 @@ const ZIA = '/zia/api/v1';
 const ZINS_AUDIENCE = 'https://api.zscaler.com';
 
 // Endpoint catalog. group drives the UI checkboxes; required means the module needs it to evaluate.
+const CAC_TYPES = ['SOCIAL_NETWORKING', 'STREAMING_MEDIA', 'WEBMAIL', 'INSTANT_MESSAGING', 'BUSINESS_PRODUCTIVITY', 'ENTERPRISE_COLLABORATION', 'SALES_AND_MARKETING',
+  'SYSTEM_AND_DEVELOPMENT', 'CONSUMER', 'HOSTING_PROVIDER', 'IT_SERVICES', 'FILE_SHARE', 'DNS_OVER_HTTPS', 'HUMAN_RESOURCES', 'LEGAL', 'HEALTH_CARE', 'FINANCE', 'CUSTOM_CAPP', 'AI_ML'];
 const ENDPOINTS = [
   { key: 'urlFilteringRules', group: 'zia', label: 'URL filtering rules', path: `${ZIA}/urlFilteringRules` },
   { key: 'firewallRules', group: 'zia', label: 'Firewall rules', path: `${ZIA}/firewallFilteringRules` },
   { key: 'dnsRules', group: 'zia', label: 'DNS control rules', path: `${ZIA}/firewallDnsRules` },
   { key: 'sslRules', group: 'zia', label: 'SSL inspection rules', path: `${ZIA}/sslInspectionRules` },
+  { key: 'cloudAppRules', group: 'zia', label: 'Cloud App Control rules', multi: CAC_TYPES.map((t) => ({ type: t, path: `${ZIA}/webApplicationRules/${t}` })) },
   { key: 'fileTypeRules', group: 'zia', label: 'File type control rules', path: `${ZIA}/fileTypeRules` },
   { key: 'sandboxRules', group: 'zia', label: 'Sandbox rules', path: `${ZIA}/sandboxRules` },
   { key: 'webDlpRules', group: 'zia', label: 'Web DLP rules', path: `${ZIA}/webDlpRules` },
@@ -177,12 +180,18 @@ const ENDPOINTS = [
   { key: 'zccAppServices', group: 'zcc', label: 'ZCC IP-based app bypass definitions', path: '/zcc/papi/public/v1/webAppService/listByCompany' },
 ];
 
+const zpaBase = (id, v = 1) => `/zpa/mgmtconfig/v${v}/admin/customers/${id}`;
 function zpaEndpoints(customerId) {
-  const base = `/zpa/mgmtconfig/v1/admin/customers/${customerId}`;
+  const base = zpaBase(customerId), v2 = zpaBase(customerId, 2);
   return [
     { key: 'zpaApps', group: 'zpa', label: 'ZPA application segments', path: `${base}/application`, query: { pagesize: '500' } },
     { key: 'zpaSegmentGroups', group: 'zpa', label: 'ZPA segment groups', path: `${base}/segmentGroup`, query: { pagesize: '500' } },
     { key: 'zpaAccessRules', group: 'zpa', label: 'ZPA access policy', path: `${base}/policySet/rules/policyType/ACCESS_POLICY`, query: { pagesize: '500' } },
+    { key: 'zpaForwardingRules', group: 'zpa', label: 'ZPA client forwarding policy', path: `${base}/policySet/rules/policyType/CLIENT_FORWARDING_POLICY`, query: { pagesize: '500' } },
+    { key: 'zpaServerGroups', group: 'zpa', label: 'ZPA server groups', path: `${base}/serverGroup`, query: { pagesize: '500' } },
+    { key: 'zpaAccessPolicySet', group: 'zpa', label: 'ZPA access policy set', path: `${base}/policySet/policyType/ACCESS_POLICY` },
+    { key: 'zpaIdps', group: 'zpa', label: 'ZPA identity providers', path: `${v2}/idp`, query: { pagesize: '500' } },
+    { key: 'zpaSamlAttributes', group: 'zpa', label: 'ZPA SAML attributes', path: `${v2}/samlAttribute`, query: { pagesize: '500' } },
   ];
 }
 
@@ -222,9 +231,9 @@ async function loadSnapshot(client, { groups = ['zia', 'zcc', 'zpa'], job } = {}
   for (const e of items) {
     if (job) job.items[e.key].state = 'loading';
     try {
-      const d = unwrap(await client.get(e.path, e.query));
-      snap.data[e.key] = d;
-      if (job) Object.assign(job.items[e.key], { state: 'ok', count: Array.isArray(d) ? d.length : d ? 1 : 0 });
+      const d = await fetchEndpoint(client, e);
+      snap.data[e.key] = d.data;
+      if (job) Object.assign(job.items[e.key], { state: 'ok', count: Array.isArray(d.data) ? d.data.length : d.data ? 1 : 0, error: d.warning });
     } catch (err) {
       snap.errors[e.key] = err.message;
       if (job) Object.assign(job.items[e.key], { state: 'error', error: err.message });
@@ -270,13 +279,34 @@ async function urlLookup(client, urls, { rateRetries } = {}) {
   return Array.isArray(out) ? out : [];
 }
 
+// One catalog entry: a single GET, a multi-part entry (Cloud App Control rule types), or a paged ZPA list.
+async function fetchEndpoint(client, e) {
+  if (e.multi) {
+    const all = [], failed = [];
+    for (const part of e.multi) {
+      try { for (const r of arr(unwrap(await client.get(part.path)))) all.push(Object.assign({ ruleType: part.type }, r)); }
+      catch (err) { failed.push(`${part.type}: ${err.status || err.message}`); }
+    }
+    if (failed.length === e.multi.length) throw new Error(`all rule types failed (${failed[0]})`);
+    return { data: all, warning: failed.length ? `${failed.length} rule type(s) not available: ${failed.slice(0, 3).join('; ')}` : undefined };
+  }
+  const first = await client.get(e.path, e.query);
+  let data = unwrap(first);
+  const pages = first && +first.totalPages;
+  if (e.group === 'zpa' && Array.isArray(data) && pages > 1) {
+    for (let pg = 2; pg <= Math.min(pages, 50); pg++) data = data.concat(arr(unwrap(await client.get(e.path, Object.assign({}, e.query, { page: String(pg) })))));
+  }
+  return { data };
+}
+const arr = (x) => (Array.isArray(x) ? x : x == null ? [] : [x]);
+
 // Re-read selected policy sets (after a change) into an existing snapshot.
 async function refreshKeys(client, snap, keys) {
   for (const e of catalog(client).filter((x) => keys.includes(x.key))) {
-    try { snap.data[e.key] = unwrap(await client.get(e.path, e.query)); delete snap.errors[e.key]; }
+    try { snap.data[e.key] = (await fetchEndpoint(client, e)).data; delete snap.errors[e.key]; }
     catch (err) { snap.errors[e.key] = err.message; }
   }
   snap.loadedAt = Date.now();
 }
 
-module.exports = { ZClient, loadSnapshot, refreshKeys, ZIA, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, ENDPOINTS };
+module.exports = { ZClient, loadSnapshot, refreshKeys, ZIA, zpaBase, CAC_TYPES, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, ENDPOINTS };
