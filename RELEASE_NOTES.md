@@ -69,7 +69,7 @@ The simulator can now fix what it finds. It is **read-only until you switch on "
 - **Save** runs the calls in order and stops at the first error. Changes are saved but not live: a *Changes pending activation* badge appears, and **Activate** is in the dialog and under **🧾 Policy changes**.
 - **Undo:** every change can be undone from 🧾 Policy changes (deletes what was created, restores what was edited). Each change is also written to `~/ZTP-Policy-Simulator/changes/<tenant>.jsonl`, with no credentials.
 - **Sample and offline sessions** apply changes to the in-memory policy only, so you can rehearse a change and re-simulate before touching a tenant.
-- **API client:** needs ZIA read/write scope in ZIdentity for changes. Payloads follow the ZeroTrustPanda Policy Wizard's verified templates. DNS rule category fields and creating a category with only CIDR ranges follow the API reference but haven't been tested on a live tenant yet, so try a single test IP first.
+- **API client:** needs ZIA read/write scope in ZIdentity for changes. Payloads follow the ZeroTrustPanda Policy Wizard's verified templates, and the block workflow has been tested end to end on a live ZIA tenant. If ZIA rejects a call, the result names the call and ZIA's error, and undo reverts the steps that ran.
 
 ### Smart defaults (always stated, always overridable)
 Port from the URL scheme (hostnames assume HTTPS/443) · network service and application from protocol+port (UDP/443 → QUIC) · request method GET, or CONNECT when not decrypted · file type from the URL path · standard DNS resolver for DNS app rules · default rules (order −1) evaluated last.
@@ -90,6 +90,7 @@ Port from the URL scheme (hostnames assume HTTPS/443) · network service and app
 - Preview of every API call, warnings for limits and shadowing catch-all rules, save with stop-on-error, undo, activation status and Activate, audit log file.
 - Write mode is off by default per session; sample and offline sessions apply to the in-memory policy.
 - Simulator now matches IPs listed as custom-category URLs and IPs on ATP allow/deny lists.
+- Tested end to end on a live ZIA tenant: a 1,252-entry SOC indicator list was blocked through a new custom URL category, destination group and URL Filtering / Firewall Filtering rules.
 
 ## Changes in 1.3.0
 - **🏷 Look up category** button on the single-transaction page: Zscaler category, threat / low-collateral / broad tag, cloud app, and the policy rules that use each category.

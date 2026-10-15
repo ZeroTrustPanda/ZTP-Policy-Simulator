@@ -59,7 +59,7 @@ The simulator can now fix what it finds. It is **read-only until you switch on "
 - **Save** runs the calls in order and stops at the first error. Changes are saved but not live: a *Changes pending activation* badge appears, and **Activate** is in the dialog and under **🧾 Policy changes**.
 - **Undo:** every change can be undone from 🧾 Policy changes (deletes what was created, restores what was edited). Each change is also written to `~/ZTP-Policy-Simulator/changes/<tenant>.jsonl`, with no credentials.
 - **Sample and offline sessions** apply changes to the in-memory policy only, so you can rehearse a change and re-simulate before touching a tenant.
-- **API client:** needs ZIA read/write scope in ZIdentity for changes. Payloads follow the ZeroTrustPanda Policy Wizard's verified templates. DNS rule category fields and creating a category with only CIDR ranges follow the API reference but haven't been tested on a live tenant yet, so try a single test IP first.
+- **API client:** needs ZIA read/write scope in ZIdentity for changes. Payloads follow the ZeroTrustPanda Policy Wizard's verified templates, and the block workflow has been tested end to end on a live ZIA tenant. If ZIA rejects a call, the result names the call and ZIA's error, and undo reverts the steps that ran.
 
 ## Run
 - Windows: `ZTP-Policy-Simulator.exe` — serves http://127.0.0.1:8787 and opens your browser (`PORT`, `NO_OPEN=1` supported).

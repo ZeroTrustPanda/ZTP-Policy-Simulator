@@ -5,6 +5,7 @@
 - Preview of every call, shadowing and limit warnings, stop-on-error apply, undo, activation, per-tenant audit log; write mode opt-in per session; in-memory ZIA for sample/offline sessions.
 - Engine: IPs in custom-category URL lists and ATP lists now match IP destinations.
 - Sample policy: ATP lists use the real API field names; firewall default rule flagged as default.
+- Tested end to end on a live ZIA tenant (block workflow with a 1,252-entry list).
 
 ## 1.3.0 — 2026-10-14
 - Single page: 🏷 Look up category (up to 100 entries) with category risk tag, cloud app and the rules referencing each category.
