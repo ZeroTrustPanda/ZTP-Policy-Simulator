@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const dns = require('dns').promises;
 const { exec } = require('child_process');
 
-const { ZClient, loadSnapshot, refreshKeys, ZIA, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX } = require('./src/zscaler');
+const { ZClient, loadSnapshot, refreshKeys, ZIA, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, zpaWorks } = require('./src/zscaler');
 const changes = require('./src/changes');
 const bulk = require('./src/bulk');
 const recommend = require('./src/recommend');
@@ -62,7 +62,21 @@ app.post('/api/connect', wrap(async (req, res) => {
   const pr = await probe(client);
   sessions.set(id, { client, snap: null, last: Date.now() });
   console.log(`[connect] ${client.tokenHost} -> ${client.apiHost}  ${Object.entries(pr).map(([k, v]) => `${k}:${v.ok ? 'ok' : v.status || 'err'}`).join(' ')}`);
-  res.json({ sessionId: id, tokenHost: client.tokenHost, apiHost: client.apiHost, probe: pr, catalog: catalog(client).map((e) => ({ key: e.key, label: e.label, group: e.group })) });
+  res.json({ sessionId: id, tokenHost: client.tokenHost, apiHost: client.apiHost, probe: pr, zpa: zpaInfo(client), catalog: catalog(client).map((e) => ({ key: e.key, label: e.label, group: e.group })) });
+}));
+
+const zpaInfo = (client) => ({ customerId: client.cfg.zpaCustomerId || null, source: client.cfg.zpaCustomerId ? client.cfg.zpaIdSource || 'entered' : null });
+
+// ZPA uses the same OneAPI client. Only its customer ID is extra, and only when the token doesn't carry it.
+app.post('/api/zpa/customer', wrap(async (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  if (s.demo || !s.client) return res.json({ ok: true, demo: true });
+  const id = String((req.body && req.body.customerId) || '').trim();
+  if (!/^\d{6,22}$/.test(id)) return res.status(400).json({ error: 'The ZPA customer ID is a long number (Administration → API Keys in the ZPA Admin Portal).' });
+  const r = await zpaWorks(s.client, id);
+  if (!r.ok) return res.status(r.status === 401 || r.status === 403 ? 403 : 400).json({ error: `ZPA didn't accept customer ID ${id} with this API client (${r.status || 'error'}). ${r.status === 401 || r.status === 403 ? 'Check the ID, and that the API client has a ZPA role in ZIdentity.' : r.error || ''}`.trim() });
+  s.client.cfg.zpaCustomerId = id; s.client.cfg.zpaIdSource = 'entered';
+  res.json({ ok: true, zpa: zpaInfo(s.client) });
 }));
 
 // Step 2: load policies (background job; poll /api/load-status).
@@ -71,6 +85,7 @@ app.post('/api/load', wrap(async (req, res) => {
   if (s.demo) return res.json({ started: false, done: true, snapshot: snapInfo(s) });
   if (s.job && !s.job.done) return res.json({ started: false, running: true });
   const groups = Array.isArray(req.body.groups) && req.body.groups.length ? req.body.groups : ['zia', 'zcc', 'zpa'];
+  if (groups.includes('zpa') && !s.client.cfg.zpaCustomerId) return res.status(400).json({ error: 'Enter the ZPA customer ID to load ZPA policies, or untick ZPA.', needsZpaId: true });
   const job = { started: Date.now(), done: false, items: {} };
   s.job = job;
   loadSnapshot(s.client, { groups, job })
@@ -357,7 +372,7 @@ app.post('/api/changes/plan', (req, res) => {
 app.post('/api/zpa/context', (req, res) => {
   const s = getSession(req, res); if (!s) return;
   const d = (s.snap && s.snap.data) || {}, arr = (x) => (Array.isArray(x) ? x : []);
-  if (!d.zpaApps && !d.zpaAccessRules) return res.status(409).json({ error: 'ZPA policy is not loaded. Add a ZPA customer ID, tick ZPA and reload policies.' });
+  if (!d.zpaApps && !d.zpaAccessRules) return res.status(409).json({ error: 'ZPA policy is not loaded. Tick Private Access (ZPA) in Load policies and reload.' });
   res.json({
     segments: arr(d.zpaApps).map((a) => ({ id: a.id, name: a.name, count: arr(a.domainNames).length, segmentGroupId: a.segmentGroupId, bypassType: a.bypassType })),
     segmentGroups: arr(d.zpaSegmentGroups).map((g) => ({ id: g.id, name: g.name })),

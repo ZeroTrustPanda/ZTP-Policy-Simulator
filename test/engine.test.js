@@ -353,3 +353,11 @@ test('PAC to a non-Zscaler proxy is a bypass; to Zscaler it is not', () => {
   const zs = ZCC.evalPath({}, { actionType: 2, customPac: 'function FindProxyForURL(u,h){return "PROXY ${GATEWAY}:80; DIRECT";}' }, ctx, {}, {});
   assert.equal(zs.outcome, 'ZIA');
 });
+
+test('ZPA customer ID candidates come from token claims, named claims first', () => {
+  const { zpaIdCandidates, jwtClaims } = require('../src/zscaler');
+  const tok = 'h.' + Buffer.from(JSON.stringify({ iat: 1700000000, other: '123456789012345678', org: { zpa_customer_id: '72058304855015424' } })).toString('base64url') + '.s';
+  const c = zpaIdCandidates(jwtClaims(tok));
+  assert.deepEqual(c, ['72058304855015424', '123456789012345678']);
+  assert.deepEqual(zpaIdCandidates(jwtClaims('not-a-jwt')), []);
+});

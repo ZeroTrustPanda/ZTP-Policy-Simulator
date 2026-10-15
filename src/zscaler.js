@@ -208,18 +208,51 @@ function unwrap(d) {
   return d;
 }
 
+// ZPA customer ID from the OneAPI token. Zscaler doesn't document a lookup, so read the token's claims
+// (no verification needed: we only use them as candidates) and keep the first one ZPA accepts.
+function jwtClaims(token) {
+  try { return JSON.parse(Buffer.from(String(token).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')); } catch { return null; }
+}
+function zpaIdCandidates(claims) {
+  const named = [], other = [];
+  const walk = (v, key, depth) => {
+    if (depth > 4 || v == null) return;
+    if (Array.isArray(v)) { v.forEach((x) => walk(x, key, depth + 1)); return; }
+    if (typeof v === 'object') { for (const [k, x] of Object.entries(v)) walk(x, k, depth + 1); return; }
+    const str = String(v);
+    for (const m of str.match(/\b\d{15,20}\b/g) || []) (/zpa|customer|tenant|org/i.test(key || '') ? named : other).push(m);
+  };
+  walk(claims, '', 0);
+  return [...new Set([...named, ...other])].slice(0, 8);
+}
+async function zpaWorks(client, id) {
+  try { await client.get(`${zpaBase(id)}/segmentGroup`, { pagesize: '1' }); return { ok: true }; }
+  catch (e) { return { ok: false, error: e.message, status: e.status }; }
+}
+async function discoverZpaCustomerId(client) {
+  const claims = jwtClaims(await client.auth());
+  const cands = zpaIdCandidates(claims);
+  client.pushLog('INFO', `ZPA customer ID: ${cands.length} candidate(s) in token claims [${Object.keys(claims || {}).join(', ')}]`, 0, '');
+  for (const id of cands) if ((await zpaWorks(client, id)).ok) return id;
+  return null;
+}
+
 // Connect probe: one cheap call per product so the user sees what the API client can reach.
 async function probe(client) {
   const checks = [
     ['ZIA', `${ZIA}/status`],
     ['ZCC', '/zcc/papi/public/v1/webForwardingProfile/listByCompany'],
   ];
-  if (client.cfg.zpaCustomerId) checks.push(['ZPA', `/zpa/mgmtconfig/v1/admin/customers/${client.cfg.zpaCustomerId}/segmentGroup`]);
   const out = {};
   for (const [name, path] of checks) {
-    try { await client.get(path, name === 'ZPA' ? { pagesize: '1' } : undefined); out[name] = { ok: true }; }
+    try { await client.get(path); out[name] = { ok: true }; }
     catch (e) { out[name] = { ok: false, error: e.message, status: e.status }; }
   }
+  if (!client.cfg.zpaCustomerId) {
+    try { client.cfg.zpaCustomerId = await discoverZpaCustomerId(client) || undefined; if (client.cfg.zpaCustomerId) client.cfg.zpaIdSource = 'token'; } catch {}
+  }
+  out.ZPA = client.cfg.zpaCustomerId ? await zpaWorks(client, client.cfg.zpaCustomerId)
+    : { ok: false, needsId: true, error: 'The ZPA customer ID isn\'t in the API token. Enter it in Load policies to include ZPA.' };
   return out;
 }
 
@@ -309,4 +342,4 @@ async function refreshKeys(client, snap, keys) {
   snap.loadedAt = Date.now();
 }
 
-module.exports = { ZClient, loadSnapshot, refreshKeys, ZIA, zpaBase, CAC_TYPES, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, ENDPOINTS };
+module.exports = { zpaWorks, zpaIdCandidates, jwtClaims, ZClient, loadSnapshot, refreshKeys, ZIA, zpaBase, CAC_TYPES, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, ENDPOINTS };

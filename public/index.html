@@ -253,7 +253,6 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
             <div><label class="form-label">Client ID</label><input type="text" id="cid" autocomplete="off"></div>
             <div><label class="form-label">Client secret</label><input type="password" id="csec" autocomplete="off"></div>
             <div><label class="form-label">Cloud</label><select id="cloud"><option value="production">Production</option><option value="beta">Beta</option><option value="alpha">Alpha</option></select></div>
-            <div><label class="form-label">ZPA customer ID (optional)</label><input type="text" id="zpac" autocomplete="off"></div>
           </div>
           <div class="btn-group">
             <button class="btn btn-primary" id="btnConnect">Connect</button>
@@ -272,6 +271,12 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
             <label class="chip on"><input type="checkbox" class="grp" value="zia" checked>🌐 Internet Access (ZIA)</label>
             <label class="chip on"><input type="checkbox" class="grp" value="zcc" checked>💻 Client Connector</label>
             <label class="chip on" id="zpaChip"><input type="checkbox" class="grp" value="zpa" checked>🔒 Private Access (ZPA)</label>
+          </div>
+          <div class="form-hint" id="zpaIdNote" style="margin-top:8px"></div>
+          <div id="zpaIdRow" class="hidden" style="margin-top:10px;max-width:560px">
+            <label class="form-label">ZPA customer ID</label>
+            <input type="text" id="zpac" autocomplete="off" inputmode="numeric" placeholder="e.g. 72058304855015424">
+            <div class="form-hint" style="margin-top:6px">Your API key works for ZPA, but its token doesn't say which ZPA tenant to read. Copy the Customer ID from the ZPA Admin Portal (Administration → API Keys). It's checked when you load policies.</div>
           </div>
           <div class="btn-group">
             <button class="btn btn-primary" id="btnLoad">Load policies</button>
@@ -505,7 +510,7 @@ function syncZpa() {
   $('useZpa').disabled = !zpaLoaded;
   $('useZpa').checked = zpaLoaded && want;
   $('zpaSwitch').style.opacity = zpaLoaded ? '' : '.55';
-  $('zpaHint').textContent = zpaLoaded ? '' : '(not loaded: add a ZPA customer ID and tick ZPA when loading policies)';
+  $('zpaHint').textContent = zpaLoaded ? '' : '(not loaded: tick Private Access (ZPA) in Load policies)';
 }
 $('useZpa').addEventListener('change', () => { try { localStorage.setItem('ztp-sim.zpa', $('useZpa').checked ? '1' : '0'); } catch {} });
 function setLoaded(snap) {
@@ -522,7 +527,27 @@ function setLoaded(snap) {
 }
 
 // ---------- chips ----------
-$('zpaChip').querySelector('input').addEventListener('change', (e) => { try { localStorage.setItem('ztp-sim.zpa', e.target.checked ? '1' : '0'); } catch {} });
+let zpaCust = { customerId: null, source: null }, tenantKey = '';
+const zpaCb = () => $('zpaChip').querySelector('input');
+function syncZpaChip() {
+  const need = zpaCb().checked && !zpaCust.customerId && !demo;
+  $('zpaIdRow').classList.toggle('hidden', !need);
+  $('zpaIdNote').textContent = !zpaCb().checked || demo ? '' : zpaCust.customerId
+    ? `ZPA uses the same API key · customer ID ${zpaCust.customerId}${zpaCust.source === 'token' ? ' (found from the API token)' : ''}` : '';
+}
+zpaCb().addEventListener('change', (e) => { try { localStorage.setItem('ztp-sim.zpa', e.target.checked ? '1' : '0'); } catch {} syncZpaChip(); });
+async function ensureZpaId() {
+  if (!zpaCb().checked || zpaCust.customerId || demo) return true;
+  const id = $('zpac').value.trim();
+  if (!id) { msg('loadMsg', 'Enter the ZPA customer ID, or untick Private Access (ZPA).'); $('zpac').focus(); return false; }
+  $('loadMsg').innerHTML = '<span class="spinner"></span> Checking ZPA customer ID…';
+  try {
+    const j = await api('/api/zpa/customer', { customerId: id });
+    zpaCust = j.zpa || { customerId: id, source: 'entered' };
+    try { localStorage.setItem('ztp-sim.zpaid.' + tenantKey, id); } catch {}
+    syncZpaChip(); return true;
+  } catch (e) { msg('loadMsg', e.message); return false; }
+}
 document.querySelectorAll('.chip').forEach((ch) => {
   const cb = ch.querySelector('input');
   ch.addEventListener('click', (ev) => { ev.preventDefault(); if (cb.disabled) return; cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); });
@@ -531,21 +556,24 @@ document.querySelectorAll('.chip').forEach((ch) => {
 
 // ---------- step 1 ----------
 function probeHtml(p) {
-  return Object.entries(p || {}).map(([k, x]) => `<span class="badge ${x.ok ? 'b-green' : 'b-red'}" style="margin-right:6px">${esc(k)} ${x.ok ? '✓ reachable' : '✗ ' + esc(x.status || 'error')}</span>`).join('')
-    + Object.entries(p || {}).filter(([, x]) => !x.ok).map(([k, x]) => `<div class="note" style="margin-top:6px">${esc(k)}: ${esc(x.error)}</div>`).join('');
+  return Object.entries(p || {}).map(([k, x]) => `<span class="badge ${x.ok ? 'b-green' : x.needsId ? 'b-amber' : 'b-red'}" style="margin-right:6px">${esc(k)} ${x.ok ? '✓ reachable' : x.needsId ? '• customer ID needed' : '✗ ' + esc(x.status || 'error')}</span>`).join('')
+    + Object.entries(p || {}).filter(([, x]) => !x.ok && !x.needsId).map(([k, x]) => `<div class="note" style="margin-top:6px">${esc(k)}: ${esc(x.error)}</div>`).join('');
 }
 $('btnConnect').onclick = async () => {
   $('btnConnect').disabled = true; $('connMsg').innerHTML = '<span class="spinner"></span> Authenticating…'; $('probeOut').innerHTML = '';
   try {
-    const j = await api('/api/connect', { vanityDomain: $('vanity').value.trim(), clientId: $('cid').value.trim(), clientSecret: $('csec').value, cloud: $('cloud').value, zpaCustomerId: $('zpac').value.trim() });
+    const j = await api('/api/connect', { vanityDomain: $('vanity').value.trim(), clientId: $('cid').value.trim(), clientSecret: $('csec').value, cloud: $('cloud').value });
     sid = j.sessionId; demo = false; $('csec').value = '';
     setAuth('Connected · ' + $('vanity').value.trim(), true);
     $('probeOut').innerHTML = probeHtml(j.probe) + `<div class="form-hint" style="margin-top:8px">Token: ${esc(j.tokenHost)} · API: ${esc(j.apiHost)}</div>`;
-    $('zpaChip').classList.toggle('hidden', !(j.catalog || []).some((c) => c.group === 'zpa'));
-    const zpaCb = $('zpaChip').querySelector('input'); if ($('zpaChip').classList.contains('hidden')) { zpaCb.checked = false; }
-    try { if (localStorage.getItem('ztp-sim.zpa') === '0') zpaCb.checked = false; } catch {}
-    zpaCb.parentNode.classList.toggle('on', zpaCb.checked);
-    for (const g of document.querySelectorAll('.grp')) { const n = { zia: 'ZIA', zcc: 'ZCC', zpa: 'ZPA' }[g.value]; if (j.probe && j.probe[n] && !j.probe[n].ok) g.checked = false; g.parentNode.classList.toggle('on', g.checked); }
+    zpaCust = j.zpa || { customerId: null, source: null }; tenantKey = $('vanity').value.trim().toLowerCase();
+    let wantZpa = true; try { wantZpa = localStorage.getItem('ztp-sim.zpa') !== '0'; $('zpac').value = localStorage.getItem('ztp-sim.zpaid.' + tenantKey) || ''; } catch {}
+    for (const g of document.querySelectorAll('.grp')) {
+      const n = { zia: 'ZIA', zcc: 'ZCC', zpa: 'ZPA' }[g.value], pr = j.probe && j.probe[n];
+      g.checked = g.value === 'zpa' ? wantZpa && !(pr && !pr.ok && !pr.needsId) : !(pr && !pr.ok);
+      g.parentNode.classList.toggle('on', g.checked);
+    }
+    syncZpaChip();
     $('connMsg').textContent = '';
     setLoaded(null); $('loadTable').innerHTML = ''; $('btnToSim').classList.add('hidden'); $('loadMsg').textContent = ''; $('btnLoad').textContent = 'Load policies';
     go(2);
@@ -581,7 +609,8 @@ function renderJob(job) {
 $('btnLoad').onclick = async () => {
   const groups = [...document.querySelectorAll('.grp:checked')].map((c) => c.value);
   if (!groups.length) { msg('loadMsg', 'Pick at least one product.'); return; }
-  $('btnLoad').disabled = true; $('btnToSim').classList.add('hidden'); $('loadMsg').innerHTML = '<span class="spinner"></span> Loading policies…';
+  $('btnLoad').disabled = true;
+  if (!(await ensureZpaId())) { $('btnLoad').disabled = false; return; } $('btnToSim').classList.add('hidden'); $('loadMsg').innerHTML = '<span class="spinner"></span> Loading policies…';
   try {
     await api('/api/load', { groups });
     for (;;) {

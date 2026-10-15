@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.1 — 2026-10-15
+- ZPA moved to a Load policies product chip (with ZIA and Client Connector); the Connect form no longer has a ZPA customer ID field.
+- ZPA uses the same OneAPI client: customer ID read from the token claims when present (verified against ZPA), otherwise asked inline once in Load policies, verified, and remembered per tenant.
+- Fix: ZPA chip hidden and Include ZPA switch stuck disabled after connecting without a customer ID.
+
 ## 1.5.0 — 2026-10-15
 - Evaluation order: ZPA (segment match, segment bypass type, client forwarding policy, access policy) → Client Connector bypasses (process flagged, VPN gateway, PAC 80/443, IP app bypass, Tunnel 2.0 exclusions, inclusions) → ZIA (ATP, Firewall, DNS, URL, Cloud App Control, Sandbox, File Type, DLP; SSL as modifier).
 - Include ZPA switch (persisted; also controls loading). Cloud App Control module and loader (19 rule types). PAC other-proxy detection.
