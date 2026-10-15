@@ -636,7 +636,8 @@ function zpaEvalRules(rules, z, snap = {}, ctx = {}) {
   const sgName = (id) => (arr(snap.zpaSegmentGroups).find((g) => String(g.id) === String(id)) || {}).name;
   const idKnown = !!(ctx.userResolved || (ctx.groups && ctx.groups.length));
   const userGroups = new Set(arr(ctx.groups).map(lc));
-  const email = lc((ctx.userResolved && ctx.userResolved.email) || ctx.user || '');
+  const email = lc((ctx.userResolved && ctx.userResolved.email) || ctx.userEmail || (/@/.test(ctx.user || '') ? ctx.user : '') || '');
+  const emails = new Set([email, lc(ctx.userResolved && ctx.userResolved.loginName), lc(ctx.userEmail)].filter(Boolean));
   const here = z.apps.length ? `destination uses segment "${z.apps[0].name}"` : 'no segment';
   const sorted = sortRules(arr(rules).map((r) => Object.assign({ order: r.ruleOrder != null ? +r.ruleOrder : r.order }, r))).filter((r) => lc(r.disabled) !== '1' && lc(r.disabled) !== 'true');
   return sorted.map((r) => {
@@ -655,11 +656,14 @@ function zpaEvalRules(rules, z, snap = {}, ctx = {}) {
           return { s: names.some((n) => userGroups.has(lc(n))) ? 'match' : 'nomatch', d: label };
         }
         if (t === 'SAML' || t === 'SCIM') {
-          const attr = arr(snap.zpaSamlAttributes).find((a) => String(a.id) === String(o.lhs)) || {};
-          const key = String(attr.samlName || attr.name || o.lhs || '');
-          const label = `${t === 'SAML' ? 'SAML' : 'SCIM'} attribute ${attr.name || key} = ${vals.join(', ')}`;
-          if (t === 'SAML' && /mail|upn|nameid|login|username/i.test(key) && email) return { s: vals.some((v) => lc(v) === email) ? 'match' : 'nomatch', d: label };
-          if (t === 'SAML' && /group|memberof/i.test(key) && idKnown) return { s: vals.some((v) => userGroups.has(lc(v))) ? 'match' : 'nomatch', d: label };
+          const attr = t === 'SAML' ? arr(snap.zpaSamlAttributes).find((a) => String(a.id) === String(o.lhs)) || {} : {};
+          const scimName = t === 'SCIM' ? (ctx.zpaScimAttrs || {})[String(o.lhs)] : null;
+          const key = String(scimName || attr.samlName || attr.name || '');
+          const label = `${t} attribute ${scimName || attr.name || o.lhs} = ${vals.join(', ')}`;
+          const emailAttr = /mail|upn|nameid|login|username/i.test(key) || (!key && vals.length && vals.every((v) => /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(v)));
+          if (emailAttr && emails.size) return { s: vals.some((v) => emails.has(lc(v))) ? 'match' : 'nomatch', d: label };
+          if (/group|memberof/i.test(key) && idKnown) return { s: vals.some((v) => userGroups.has(lc(v))) ? 'match' : 'nomatch', d: label };
+          if (/department/i.test(key) && ctx.department) return { s: vals.some((v) => lc(v) === lc(ctx.department)) ? 'match' : 'nomatch', d: label };
           return { s: 'unknown', d: label };
         }
         return { s: 'unknown', d: `${t}${vals.length ? ' ' + vals.slice(0, 3).join(', ') : ''}` };
@@ -744,7 +748,7 @@ function mZpa(snap, ctx) {
   else {
     out.verdict = 'BLOCK'; out.reason = 'Matched an application segment but no access rule allows it (ZPA default deny)';
     const maybe = out.couldOverride.filter((e) => !/DENY/.test(e.action || ''));
-    if (maybe.length) out.reason = `No access rule allows everyone, so ZPA denies by default. Allowed for users who match ${maybe.slice(0, 3).map((e) => `"${e.name}" (${e.criteria.filter((c) => c.status === 'unknown').map((c) => c.detail.replace(/ — .*$/, '')).join('; ')})`).join(' or ')}. Enter the user to check.`;
+    if (maybe.length) out.reason = `No access rule allows everyone, so ZPA denies by default. Allowed for users who match ${maybe.slice(0, 3).map((e) => `"${e.name}" (${e.criteria.filter((c) => c.status === 'unknown').map((c) => c.detail.replace(/ — .*$/, '')).join('; ')})`).join(' or ')}. ${ctx.user ? (ctx.userResolved ? 'The user\'s details don\'t settle those conditions.' : `${ctx.user} wasn't found in ZIA or ZIdentity, so its groups are unknown: enter them in Groups to check.`) : 'Enter the user to check.'}`;
     const misses = evaluated.filter((e) => e.status === 'nomatch' && !/DENY/.test(e.action || '')).slice(0, 4)
       .map((e) => `"${e.name}": ${(e.criteria.filter((c) => c.status === 'nomatch').map((c) => c.detail)[0]) || 'no match'}`);
     out.note = [out.note, misses.length ? `Allow rules that missed — ${misses.join('; ')}` : evaluated.length ? '' : 'No access rules were loaded.'].filter(Boolean).join(' ');

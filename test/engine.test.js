@@ -419,3 +419,17 @@ test('ZPA access rules match SCIM groups and SAML email for a looked-up user', (
   const no = z({ user: 'n@x', userResolved: { email: 'n@x' }, groups: ['Nurses'] });
   assert.equal(no.verdict, 'BLOCK'); assert.equal(no.confidence, 'definite'); assert.match(no.note, /user does not match/);
 });
+
+test('ZPA SCIM attribute (email) condition in the same OR block as a SCIM group', () => {
+  const { simulate } = require('../src/engine');
+  const data = JSON.parse(JSON.stringify(require('../src/demo-snapshot.json')));
+  data.zpaApps.push({ id: '8020', name: 'ZTH Rad', domainNames: ['rad.zerotrusthospital.org'], segmentGroupId: '5060', tcpPortRanges: ['8042', '8042'] });
+  data.zpaAccessRules.push({ id: 'h1', name: 'Hajny Admin Access', action: 'ALLOW', ruleOrder: '4', conditions: [
+    { operator: 'OR', operands: [{ objectType: 'APP_GROUP', rhs: '5060' }] },
+    { operator: 'OR', operands: [{ objectType: 'SCIM_GROUP', idpId: '123', rhs: '999' }, { objectType: 'SCIM', idpId: '123', lhs: '2882', rhs: 'hajny@zerotrusthospital.org' }] }] });
+  const z = (extra) => simulate({ data }, Object.assign({ target: M.parseTarget('rad.zerotrusthospital.org'), port: 8042, protocol: 'tcp', categories: [], resolvedIps: [], groups: [], notes: [], useZpa: true, zpaScimNames: { 999: 'ZTH Admins' }, zpaScimAttrs: { 2882: 'emails.value' } }, extra), {}).modules[0];
+  assert.equal(z({ user: 'hajny@zerotrusthospital.org', userEmail: 'hajny@zerotrusthospital.org', userResolved: { email: 'hajny@zerotrusthospital.org' }, groups: ['Admins'] }).decidingRule.name, 'Hajny Admin Access');
+  assert.equal(z({ user: 'hajny@zerotrusthospital.org', userEmail: 'hajny@zerotrusthospital.org' }).decidingRule.name, 'Hajny Admin Access'); // not found, typed email still checks
+  const other = z({ user: 'x@zerotrusthospital.org', userEmail: 'x@zerotrusthospital.org', userResolved: { email: 'x@zerotrusthospital.org' }, groups: ['Nurses'] });
+  assert.equal(other.verdict, 'BLOCK'); assert.equal(other.confidence, 'definite');
+});

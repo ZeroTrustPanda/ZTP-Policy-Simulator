@@ -305,13 +305,16 @@ async function lookupUser(client, nameOrEmail) {
   try {
     const list = await client.get(`${ZIA}/users`, { search: nameOrEmail, pageSize: '10' });
     const arr2 = Array.isArray(list) ? list : [];
-    const u = arr2.find((x) => String(x.email || '').toLowerCase() === q || String(x.name || '').toLowerCase() === q) || arr2[0];
+    const u = arr2.find((x) => String(x.email || '').toLowerCase() === q || String(x.name || '').toLowerCase() === q); // exact only
     if (u) zia = { name: u.name, email: u.email, groups: (u.groups || []).map((g) => g.name), department: u.department && u.department.name };
   } catch (e) { ziaErr = e; }
   try {
-    let list = recs(await client.get(`${ZID}/users`, { loginName: nameOrEmail, limit: '10' }));
-    if (!list.length) list = recs(await client.get(`${ZID}/users`, { 'primaryEmail[like]': nameOrEmail, limit: '10' }));
-    const u = list.find((x) => [x.loginName, x.primaryEmail, x.displayName].some((v) => String(v || '').toLowerCase() === q)) || list[0];
+    const exact = (list) => list.find((x) => [x.loginName, x.primaryEmail, x.secondaryEmail, x.displayName].some((v) => String(v || '').toLowerCase() === q));
+    let u = null;
+    for (const query of [{ loginName: nameOrEmail }, { 'primaryEmail[like]': nameOrEmail }, { 'loginName[like]': nameOrEmail }, { 'displayName[like]': nameOrEmail }]) {
+      try { u = exact(recs(await client.get(`${ZID}/users`, Object.assign({ limit: '50' }, query)))); } catch (e) { if (!zidErr) zidErr = e; }
+      if (u) break;
+    }
     if (u) {
       const g = recs(await client.get(`${ZID}/users/${encodeURIComponent(u.id)}/groups`, { limit: '1000' }));
       zid = { name: u.displayName || u.loginName, email: u.primaryEmail || u.loginName, groups: g.map((x) => x.name || x.displayName).filter(Boolean),
@@ -327,6 +330,12 @@ async function lookupUser(client, nameOrEmail) {
   const groups = [...new Set([...(zia ? zia.groups : []), ...(zid ? zid.groups : [])])];
   return Object.assign({}, zid || {}, zia || {}, { groups, department: (zia && zia.department) || (zid && zid.department),
     source: zia && zid ? 'ZIA + ZIdentity' : zia ? 'ZIA' : 'ZIdentity', ziaError: ziaErr && !zia ? ziaErr.message : undefined });
+}
+
+// ZPA SCIM attribute name (e.g. emails.value, userName) by IdP and attribute ID.
+async function zpaScimAttrName(client, idpId, attrId) {
+  const a = await client.get(`/zpa/mgmtconfig/v1/admin/customers/${client.cfg.zpaCustomerId}/idp/${encodeURIComponent(idpId)}/scimattribute/${encodeURIComponent(attrId)}`);
+  return a && (a.name || a.schemaURI);
 }
 
 // ZPA SCIM group name by ID (rules reference SCIM groups by ID).
@@ -373,4 +382,4 @@ async function refreshKeys(client, snap, keys) {
   snap.loadedAt = Date.now();
 }
 
-module.exports = { zpaScimGroupName, zpaWorks, zpaIdCandidates, jwtClaims, ZClient, loadSnapshot, refreshKeys, ZIA, zpaBase, CAC_TYPES, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, ENDPOINTS };
+module.exports = { zpaScimAttrName, zpaScimGroupName, zpaWorks, zpaIdCandidates, jwtClaims, ZClient, loadSnapshot, refreshKeys, ZIA, zpaBase, CAC_TYPES, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, ENDPOINTS };

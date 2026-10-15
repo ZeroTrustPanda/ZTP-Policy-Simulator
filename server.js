@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const dns = require('dns').promises;
 const { exec } = require('child_process');
 
-const { ZClient, loadSnapshot, refreshKeys, ZIA, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, zpaWorks, zpaScimGroupName } = require('./src/zscaler');
+const { ZClient, loadSnapshot, refreshKeys, ZIA, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, zpaWorks, zpaScimGroupName, zpaScimAttrName } = require('./src/zscaler');
 const changes = require('./src/changes');
 const bulk = require('./src/bulk');
 const recommend = require('./src/recommend');
@@ -172,6 +172,8 @@ async function buildContext(s, b) {
       } catch (e) { ctx.notes.push(`Category lookup failed: ${e.message}`); }
     } else if (tg.isIp) ctx.notes.push('Category lookup skipped: CIDRs and ranges have no single classification — enter one IP to look it up.');
   }
+  // Accept pasted text like "288261371856945305 = jane@acme.org": use the email in it.
+  if (b.user) { const em = String(b.user).match(/[^\s=<>"',;()]+@[^\s=<>"',;()]+\.[a-z]{2,}/i); ctx.userEmail = em ? em[0].toLowerCase() : null; if (em && em[0] !== String(b.user).trim()) { ctx.user = em[0]; b = Object.assign({}, b, { user: em[0] }); } }
   if (b.user && !s.demo && s.client && !(b.groups && b.groups.length)) {
     s.userCache = s.userCache || new Map();
     try {
@@ -182,18 +184,32 @@ async function buildContext(s, b) {
         ctx.groups = u.groups; ctx.department = ctx.department || u.department; ctx.userResolved = u;
         ctx.notes.push(`User ${u.email || u.name} found in ${u.source}: ${u.groups.length} group${u.groups.length === 1 ? '' : 's'}${u.groups.length ? ' (' + u.groups.slice(0, 8).join(', ') + (u.groups.length > 8 ? ', …' : '') + ')' : ''}.`);
         if (u.ziaError) ctx.notes.push(`ZIA's user list refused this API client (${/HTTP (\d+)/.exec(u.ziaError) ? /HTTP (\d+)/.exec(u.ziaError)[1] : 'error'}), so groups came from ZIdentity.`);
-      } else ctx.notes.push(`User "${b.user}" not found in ZIA or ZIdentity; group/department rules will show as unknown unless you enter them.`);
+      } else ctx.notes.push(`User "${b.user}" not found in ZIA or ZIdentity${ctx.userEmail ? '; ZPA email conditions are checked against the email you entered' : ''}. Group rules show as unknown unless you enter the groups.`);
     } catch (e) { ctx.notes.push(`User lookup failed: ${e.message}`); }
   }
   // ZPA access rules reference SCIM groups by ID: resolve the names once per session so a user's groups can be matched.
   const d = s.snap && s.snap.data;
-  if (d && (ctx.userResolved || ctx.groups.length) && !s.demo && s.client && s.client.cfg.zpaCustomerId && b.useZpa !== false) {
+  if (d && d.zpaAccessRules && !s.demo && s.client && s.client.cfg.zpaCustomerId && b.useZpa !== false) {
     s.scimNames = s.scimNames || new Map();
     const ids = new Set();
     for (const r of [...(d.zpaAccessRules || []), ...(d.zpaForwardingRules || [])]) for (const c of r.conditions || []) for (const o of c.operands || [])
       if (o.objectType === 'SCIM_GROUP' && !o.name) for (const v of (o.values || (o.rhs != null ? [o.rhs] : []))) if (!s.scimNames.has(String(v))) ids.add(String(v));
     for (const id of [...ids].slice(0, 150)) { try { s.scimNames.set(id, await zpaScimGroupName(s.client, id)); } catch { s.scimNames.set(id, null); } }
     ctx.zpaScimNames = Object.fromEntries(s.scimNames);
+  }
+  // SCIM attribute conditions (lhs = attribute ID, rhs = value): resolve attribute names so email/userName ones can be checked.
+  if (d && d.zpaAccessRules && !s.demo && s.client && s.client.cfg.zpaCustomerId && b.useZpa !== false) {
+    s.scimAttrs = s.scimAttrs || new Map();
+    const want = new Map();
+    const idps = (d.zpaIdps || []).map((i) => String(i.id));
+    for (const r of [...(d.zpaAccessRules || []), ...(d.zpaForwardingRules || [])]) for (const c of r.conditions || []) for (const o of c.operands || [])
+      if (o.objectType === 'SCIM' && o.lhs != null && !s.scimAttrs.has(String(o.lhs))) want.set(String(o.lhs), o.idpId || o.idp_id || null);
+    for (const [attr, idp] of [...want].slice(0, 50)) {
+      let name = null;
+      for (const i of idp ? [String(idp)] : idps.slice(0, 5)) { try { name = await zpaScimAttrName(s.client, i, attr); if (name) break; } catch {} }
+      s.scimAttrs.set(attr, name);
+    }
+    ctx.zpaScimAttrs = Object.fromEntries(s.scimAttrs);
   }
   return ctx;
 }

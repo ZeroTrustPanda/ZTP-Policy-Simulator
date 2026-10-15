@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.4 — 2026-10-15
+- ZPA SCIM attribute conditions (email/userName/department/groups) evaluated; attribute names resolved via /idp/{idp}/scimattribute/{id}.
+- User lookup: exact match only (no first-result fallback); email extracted from pasted text; typed email used for ZPA conditions when the user isn't found.
+- SCIM names resolved without a user; ZPA wording on the change card.
+
 ## 1.5.3 — 2026-10-15
 - User lookup: ZIA then ZIdentity (/ziam/admin/api/v1/users + /users/{id}/groups); ZIA 403 no longer blocks user context.
 - ZPA access/forwarding rules: SCIM_GROUP matched by resolved group name, SAML email/group attributes matched, negated conditions honoured; condition details name targets vs the destination's segment; default-deny lists the Allow rules that missed; user-dependent results name the rules that would allow.
