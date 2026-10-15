@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const dns = require('dns').promises;
 const { exec } = require('child_process');
 
-const { ZClient, loadSnapshot, refreshKeys, ZIA, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, zpaWorks, zpaScimGroupName, zpaScimAttrName, zidIndex } = require('./src/zscaler');
+const { ZClient, loadSnapshot, refreshKeys, ZIA, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, zpaWorks, zpaScimGroupName, zpaScimAttrName, zidIndex, zpaScimMembership } = require('./src/zscaler');
 const changes = require('./src/changes');
 const bulk = require('./src/bulk');
 const recommend = require('./src/recommend');
@@ -194,8 +194,30 @@ async function buildContext(s, b) {
         ctx.groups = u.groups; ctx.department = ctx.department || u.department; ctx.userResolved = u;
         ctx.notes.push(`User ${u.email || u.name} found in ${u.source}: ${u.groups.length} group${u.groups.length === 1 ? '' : 's'}${u.groups.length ? ' (' + u.groups.slice(0, 8).join(', ') + (u.groups.length > 8 ? ', …' : '') + ')' : ''}.`);
         if (u.ziaError) ctx.notes.push(`ZIA's user list refused this API client (${/HTTP (\d+)/.exec(u.ziaError) ? /HTTP (\d+)/.exec(u.ziaError)[1] : 'error'}), so groups came from ZIdentity.`);
-      } else ctx.notes.push(`User "${b.user}" not found in ZIA or ZIdentity${ctx.userEmail ? '; ZPA email conditions are checked against the email you entered' : ''}. Group rules show as unknown unless you enter the groups.`);
+      } else ctx.notes.push(`User "${b.user}" not found in ZIA or ZIdentity${s.client._zidDiag ? ` (${s.client._zidDiag})` : ''}.`);
     } catch (e) { ctx.notes.push(`User lookup failed: ${e.message}`); }
+  }
+  // ZPA's own record of the user: SCIM group membership per SCIM-enabled IdP (what ZPA evaluates SCIM_GROUP against).
+  const dz = s.snap && s.snap.data;
+  if (b.user && dz && dz.zpaAccessRules && !s.demo && s.client && s.client.cfg.zpaCustomerId && b.useZpa !== false) {
+    const idps = (dz.zpaIdps || []).filter((i) => i.scimEnabled || i.enableScimBasedPolicy);
+    if (idps.length) {
+      s.scimMember = s.scimMember || new Map();
+      const names = [...new Set([ctx.userEmail, b.user, ctx.userResolved && ctx.userResolved.loginName].filter(Boolean).map((x) => String(x)))];
+      let res = null;
+      for (const n of names) {
+        const k = n.toLowerCase();
+        if (!s.scimMember.has(k)) s.scimMember.set(k, await zpaScimMembership(s.client, idps, n));
+        const r = s.scimMember.get(k);
+        if (r.some((x) => x.groups && x.groups.length)) { res = r; break; }
+        res = res || r;
+      }
+      ctx.zpaScimMember = Object.fromEntries((res || []).filter((x) => x.groups && x.groups.length).map((x) => [x.idpId, x.groups.map((g) => g.id)])); // empty = unknown, not 'in no groups'
+      for (const x of res || []) for (const g of x.groups || []) { s.scimNames = s.scimNames || new Map(); s.scimNames.set(g.id, g.name); }
+      const found = (res || []).filter((x) => x.groups && x.groups.length);
+      if (found.length) ctx.notes.push(`ZPA SCIM: ${found.map((x) => `${x.idp}: ${x.groups.length} group${x.groups.length === 1 ? '' : 's'} (${x.groups.slice(0, 6).map((g) => g.name).join(', ')}${x.groups.length > 6 ? ', …' : ''})`).join('; ')}.`);
+      else ctx.notes.push(`ZPA SCIM: no group membership found for ${names[0]}${(res || []).filter((x) => x.note).map((x) => ` (${x.idp}: ${x.note})`).join('')}.`);
+    }
   }
   // ZPA access rules reference SCIM groups by ID: resolve the names once per session so a user's groups can be matched.
   const d = s.snap && s.snap.data;

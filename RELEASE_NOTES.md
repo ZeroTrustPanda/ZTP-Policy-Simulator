@@ -1,4 +1,4 @@
-# ZeroTrustPanda ZS Policy Simulator v1.6.1
+# ZeroTrustPanda ZS Policy Simulator v1.6.2
 
 **Would this be allowed, blocked or bypassed — and by what?** A standalone simulator that pulls your live Zscaler policy over OneAPI and evaluates a transaction across ZIA, ZPA and Client Connector the way the cloud would, in rule order, then shows the deciding rule and everything else that could change the outcome.
 
@@ -7,12 +7,12 @@ Companion to the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustP
 ## Downloads
 | Platform | File |
 |---|---|
-| Windows x64 | [ZTP-Policy-Simulator-1.6.1-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.1/ZTP-Policy-Simulator-1.6.1-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
-| macOS Apple Silicon | [ZTP-Policy-Simulator-1.6.1-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.1/ZTP-Policy-Simulator-1.6.1-macos-arm64.zip) |
-| macOS Intel | [ZTP-Policy-Simulator-1.6.1-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.1/ZTP-Policy-Simulator-1.6.1-macos-x64.zip) |
+| Windows x64 | [ZTP-Policy-Simulator-1.6.2-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.2/ZTP-Policy-Simulator-1.6.2-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
+| macOS Apple Silicon | [ZTP-Policy-Simulator-1.6.2-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.2/ZTP-Policy-Simulator-1.6.2-macos-arm64.zip) |
+| macOS Intel | [ZTP-Policy-Simulator-1.6.2-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.2/ZTP-Policy-Simulator-1.6.2-macos-x64.zip) |
 | Source | clone the repo, or GitHub's "Source code" download on the release |
 
-Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.1/SHA256SUMS.txt)
+Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.2/SHA256SUMS.txt)
 
 No install, no Node.js required. Run it and it opens `http://127.0.0.1:8787`.
 macOS builds are unsigned — before first run: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`.
@@ -109,6 +109,11 @@ Port from the URL scheme (hostnames assume HTTPS/443) · network service and app
 - Zscaler offers no "evaluate this transaction" API, so evaluation is re-implemented from rule data. Time windows, user agent, device trust, risk score and source-port bypasses are flagged as unknown rather than evaluated.
 - No per-transaction log lookup: the console's transaction-log endpoints refuse API-client tokens. Use the console's Web / Firewall Insights logs for per-transaction proof.
 - ZCC field names follow the shapes verified by the Policy Wizard; report any app profile that shows "no forwarding profile linked".
+
+## Changes in 1.6.2
+- **ZPA reads the user's SCIM groups from ZPA itself.** For each SCIM-enabled IdP, the simulator asks ZPA which SCIM groups it holds for the user (`scimgroup/idpId/{idp}?scimUserName=…`) and matches SCIM group conditions by group ID. This works for users who exist only in the IdP (for example Entra ID or Okta) and not in ZIdentity or ZIA.
+- Checks against the API ignoring that filter: if it returns every group, the result isn't trusted and says so. An empty answer leaves SCIM conditions as *depends on user*, never as "not a member".
+- **A user that isn't found now comes with the reason:** how many ZIdentity users were read, and what ZPA SCIM returned.
 
 ## Changes in 1.6.1
 - **One "User or group" field** replaces the separate User, Groups and Compare as fields. Pick one user or group to simulate as it. Pick a second to compare side by side. The button changes to **Compare**.

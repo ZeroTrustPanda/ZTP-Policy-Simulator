@@ -345,7 +345,10 @@ async function lookupUser(client, nameOrEmail, opts = {}) {
     let u = null;
     if (opts.zidId) u = { id: opts.zidId, loginName: nameOrEmail, primaryEmail: /@/.test(nameOrEmail) ? nameOrEmail : undefined, displayName: opts.name };
     let indexComplete = false;
-    if (!u) { try { const idx = await zidIndex(client); u = exact(idx.users); indexComplete = idx.complete; } catch (e) { zidErr = e; } }
+    if (!u) {
+      try { const idx = await zidIndex(client); u = exact(idx.users); indexComplete = idx.complete; client._zidDiag = `ZIdentity directory: ${idx.users.length} user${idx.users.length === 1 ? '' : 's'} read${idx.complete ? '' : ' (capped)'}${u ? '' : `, none with login or email ${nameOrEmail}`}`; }
+      catch (e) { zidErr = e; client._zidDiag = `ZIdentity directory couldn't be read: ${e.message}`; }
+    }
     if (!u && !indexComplete) { // index unavailable or capped: ask the API with filters, still requiring an exact match
       for (const query of [{ loginName: nameOrEmail }, { 'primaryEmail[like]': nameOrEmail }, { 'loginName[like]': nameOrEmail }]) {
         try { u = exact(recs(await client.get(`${ZID}/users`, Object.assign({ limit: '100' }, query)))); } catch (e) { if (!zidErr) zidErr = e; }
@@ -372,6 +375,25 @@ async function lookupUser(client, nameOrEmail, opts = {}) {
 async function zpaScimAttrName(client, idpId, attrId) {
   const a = await client.get(`/zpa/mgmtconfig/v1/admin/customers/${client.cfg.zpaCustomerId}/idp/${encodeURIComponent(idpId)}/scimattribute/${encodeURIComponent(attrId)}`);
   return a && (a.name || a.schemaURI);
+}
+
+// ZPA's own view of a user: the SCIM groups the IdP pushed for them, per SCIM-enabled IdP. Guards against the API
+// ignoring the scimUserName filter (then it would return every group).
+async function zpaScimMembership(client, idps, userName) {
+  const out = [];
+  const base = `/zpa/userconfig/v1/customers/${client.cfg.zpaCustomerId}/scimgroup/idpId`;
+  const list = (r) => (Array.isArray(r) ? r : (r && r.list) || []);
+  const total = (r) => (r && r.totalCount != null ? +r.totalCount : null);
+  for (const idp of idps) {
+    try {
+      const all = await client.get(`${base}/${encodeURIComponent(idp.id)}`, { pagesize: '1' });
+      const mine = await client.get(`${base}/${encodeURIComponent(idp.id)}`, { scimUserName: userName, pagesize: '500' });
+      const n = total(mine) != null ? total(mine) : list(mine).length, nAll = total(all);
+      const ignored = nAll != null && nAll > 3 && n === nAll;
+      out.push({ idpId: String(idp.id), idp: idp.name, groups: ignored ? null : list(mine).map((g) => ({ id: String(g.id), name: g.name })), note: ignored ? 'the API ignored the user filter' : null });
+    } catch (e) { out.push({ idpId: String(idp.id), idp: idp.name, groups: null, note: e.message }); }
+  }
+  return out;
 }
 
 // ZPA SCIM group name by ID (rules reference SCIM groups by ID).
@@ -418,4 +440,4 @@ async function refreshKeys(client, snap, keys) {
   snap.loadedAt = Date.now();
 }
 
-module.exports = { zidIndex, zidUserKeys, zpaScimAttrName, zpaScimGroupName, zpaWorks, zpaIdCandidates, jwtClaims, ZClient, loadSnapshot, refreshKeys, ZIA, zpaBase, CAC_TYPES, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, ENDPOINTS };
+module.exports = { zpaScimMembership, zidIndex, zidUserKeys, zpaScimAttrName, zpaScimGroupName, zpaWorks, zpaIdCandidates, jwtClaims, ZClient, loadSnapshot, refreshKeys, ZIA, zpaBase, CAC_TYPES, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, ENDPOINTS };

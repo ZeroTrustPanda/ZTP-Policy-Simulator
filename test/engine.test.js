@@ -462,3 +462,25 @@ test('ZPA: identity matches and only device posture is open → allow, condition
   assert.ok(yes.summary.alsoBasedOn.some((x) => /Device check fails/.test(x.condition) && x.action === "BLOCK"));
   assert.equal(run(['Nursing']).summary.primary.action, 'BLOCK');
 });
+
+test('ZPA SCIM membership: groups by user, and ignored filters are detected', async () => {
+  const { zpaScimMembership } = require('../src/zscaler');
+  const mk = (ignore) => ({ cfg: { zpaCustomerId: '1' }, get: async (p, q) => {
+    const all = [{ id: '1', name: 'a' }, { id: '2', name: 'b' }, { id: '3', name: 'c' }, { id: '777', name: 'radiologists' }, { id: '5', name: 'e' }];
+    if (q.pagesize === '1') return { list: all.slice(0, 1), totalCount: String(all.length) };
+    if (ignore) return { list: all, totalCount: String(all.length) };
+    return q.scimUserName === 'jp@x' ? { list: [all[3]], totalCount: '1' } : { list: [], totalCount: '0' };
+  } });
+  const ok = await zpaScimMembership(mk(false), [{ id: '123', name: 'Entra' }], 'jp@x');
+  assert.deepEqual(ok[0].groups, [{ id: '777', name: 'radiologists' }]);
+  const bad = await zpaScimMembership(mk(true), [{ id: '123', name: 'Entra' }], 'jp@x');
+  assert.equal(bad[0].groups, null); assert.match(bad[0].note, /ignored/);
+});
+
+test('SCIM_GROUP is matched by ID from ZPA SCIM membership', () => {
+  const { simulate } = require('../src/engine');
+  const data = JSON.parse(JSON.stringify(require('../src/demo-snapshot.json')));
+  const ctx = (mem) => ({ target: M.parseTarget('pacs.hospital.example'), port: 104, protocol: 'tcp', categories: [], resolvedIps: [], groups: [], user: 'jp@x', userEmail: 'jp@x', notes: [], useZpa: true, zpaScimMember: mem });
+  assert.equal(simulate({ data }, ctx({ 123: ['456'] }), {}).summary.primary.action, 'ALLOW');
+  assert.equal(simulate({ data }, ctx({ 123: ['457'] }), {}).summary.primary.action, 'BLOCK');
+});

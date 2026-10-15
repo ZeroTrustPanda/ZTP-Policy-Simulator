@@ -634,7 +634,7 @@ function zpaEvalRules(rules, z, snap = {}, ctx = {}) {
   const appIds = z.apps.map((a) => String(a.id));
   const appName = (id) => (arr(snap.zpaApps).find((a) => String(a.id) === String(id)) || {}).name;
   const sgName = (id) => (arr(snap.zpaSegmentGroups).find((g) => String(g.id) === String(id)) || {}).name;
-  const idKnown = !!(ctx.userResolved || (ctx.groups && ctx.groups.length));
+  const idKnown = !!(ctx.userResolved || (ctx.groups && ctx.groups.length) || (ctx.zpaScimMember && Object.keys(ctx.zpaScimMember).length));
   const userGroups = new Set(arr(ctx.groups).map(lc));
   const email = lc((ctx.userResolved && ctx.userResolved.email) || ctx.userEmail || (/@/.test(ctx.user || '') ? ctx.user : '') || '');
   const emails = new Set([email, lc(ctx.userResolved && ctx.userResolved.loginName), lc(ctx.userEmail)].filter(Boolean));
@@ -652,6 +652,11 @@ function zpaEvalRules(rules, z, snap = {}, ctx = {}) {
         if (t === 'SCIM_GROUP') {
           const names = vals.map((v) => (o.name && vals.length === 1 ? o.name : (ctx.zpaScimNames || {})[v]) || null);
           const label = `SCIM group ${vals.map((v, i) => `"${names[i] || v}"`).join(', ')}`;
+          // Best source: ZPA's own SCIM membership for the user (group IDs per IdP).
+          const mem = ctx.zpaScimMember || {};
+          const idpKey = String(o.idpId || o.lhs || '');
+          const ids = mem[idpKey] || (Object.keys(mem).length ? [].concat(...Object.values(mem)) : null);
+          if (ids && (mem[idpKey] || Object.keys(mem).length)) return { s: vals.some((v) => ids.includes(v)) ? 'match' : 'nomatch', d: label + ' (ZPA SCIM membership)' };
           if (!idKnown || names.some((n) => !n)) return { s: 'unknown', d: label };
           return { s: names.some((n) => userGroups.has(lc(n))) ? 'match' : 'nomatch', d: label };
         }
@@ -773,7 +778,7 @@ function mZpa(snap, ctx) {
       out.stages.push({ step: 'Access policy', status: 'unknown', detail: out.reason });
       return out;
     }
-    if (maybe.length) out.reason = `No access rule allows everyone, so ZPA denies by default. Allowed for users who match ${maybe.slice(0, 3).map((e) => `"${e.name}" (${e.criteria.filter((c) => c.status === 'unknown').map((c) => c.detail.replace(/ — .*$/, '')).join('; ')})`).join(' or ')}. ${ctx.user ? (ctx.userResolved ? 'The user\'s details don\'t settle those conditions.' : `${ctx.user} wasn't found in ZIA or ZIdentity, so its groups are unknown: enter them in Groups to check.`) : 'Enter the user to check.'}`;
+    if (maybe.length) out.reason = `No access rule allows everyone, so ZPA denies by default. Allowed for users who match ${maybe.slice(0, 3).map((e) => `"${e.name}" (${e.criteria.filter((c) => c.status === 'unknown').map((c) => c.detail.replace(/ — .*$/, '')).join('; ')})`).join(' or ')}. ${ctx.user ? (ctx.userResolved || (ctx.zpaScimMember && Object.keys(ctx.zpaScimMember).length) ? 'The user\'s details don\'t settle those conditions.' : `${ctx.user} wasn't found in ZIA, ZIdentity or ZPA SCIM, so its groups are unknown (see the notes below).`) : 'Enter the user to check.'}`;
     const misses = evaluated.filter((e) => e.status === 'nomatch' && !/DENY/.test(e.action || '')).slice(0, 4)
       .map((e) => `"${e.name}": ${(e.criteria.filter((c) => c.status === 'nomatch').map((c) => c.detail)[0]) || 'no match'}`);
     out.note = [out.note, misses.length ? `Allow rules that missed — ${misses.join('; ')}` : evaluated.length ? '' : 'No access rules were loaded.'].filter(Boolean).join(' ');

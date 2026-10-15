@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.2 — 2026-10-15
+- ZPA SCIM membership lookup per SCIM IdP (scimUserName filter, ignored-filter guard); SCIM_GROUP matched by ID.
+- Not-found diagnostics for ZIdentity and ZPA SCIM in the result notes.
+
 ## 1.6.1 — 2026-10-15
 - Single "User or group" picker (1 = simulate as, 2 = compare); keyboard navigation; typed fallbacks.
 - ZIdentity directory index (paged, cached 10 min) for search and exact lookups; all search sources filtered locally; picks carry the ZIdentity ID.
