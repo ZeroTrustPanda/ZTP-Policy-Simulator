@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.3 — 2026-10-15
+- User lookup: ZIA then ZIdentity (/ziam/admin/api/v1/users + /users/{id}/groups); ZIA 403 no longer blocks user context.
+- ZPA access/forwarding rules: SCIM_GROUP matched by resolved group name, SAML email/group attributes matched, negated conditions honoured; condition details name targets vs the destination's segment; default-deny lists the Allow rules that missed; user-dependent results name the rules that would allow.
+
 ## 1.5.2 — 2026-10-15
 - ZPA segment matching uses ZPA semantics: exact FQDN entries, *.domain = subdomains only, most specific segment wins (port-aware); hint when the apex is only covered by a wildcard; wildcard queries overlapping only narrower segments fall through to ZIA.
 

@@ -295,13 +295,44 @@ async function loadSnapshot(client, { groups = ['zia', 'zcc', 'zpa'], job } = {}
 }
 
 // Resolve a user's groups/department from ZIA (best effort).
+// User lookup: ZIA's user list first, then ZIdentity (OneAPI /ziam), which is where ZPA's SCIM/SAML identity comes
+// from and which still works when ZIA's /users is blocked for the API client.
+const ZID = '/ziam/admin/api/v1';
+const recs = (d) => (Array.isArray(d) ? d : (d && (d.records || d.list || d.items)) || []);
 async function lookupUser(client, nameOrEmail) {
-  const out = await client.get(`${ZIA}/users`, { search: nameOrEmail, pageSize: '10' });
-  const list = Array.isArray(out) ? out : [];
   const q = String(nameOrEmail).toLowerCase();
-  const u = list.find((x) => String(x.email || '').toLowerCase() === q || String(x.name || '').toLowerCase() === q) || list[0];
-  if (!u) return null;
-  return { name: u.name, email: u.email, groups: (u.groups || []).map((g) => g.name), department: u.department && u.department.name };
+  let zia = null, ziaErr = null, zid = null, zidErr = null;
+  try {
+    const list = await client.get(`${ZIA}/users`, { search: nameOrEmail, pageSize: '10' });
+    const arr2 = Array.isArray(list) ? list : [];
+    const u = arr2.find((x) => String(x.email || '').toLowerCase() === q || String(x.name || '').toLowerCase() === q) || arr2[0];
+    if (u) zia = { name: u.name, email: u.email, groups: (u.groups || []).map((g) => g.name), department: u.department && u.department.name };
+  } catch (e) { ziaErr = e; }
+  try {
+    let list = recs(await client.get(`${ZID}/users`, { loginName: nameOrEmail, limit: '10' }));
+    if (!list.length) list = recs(await client.get(`${ZID}/users`, { 'primaryEmail[like]': nameOrEmail, limit: '10' }));
+    const u = list.find((x) => [x.loginName, x.primaryEmail, x.displayName].some((v) => String(v || '').toLowerCase() === q)) || list[0];
+    if (u) {
+      const g = recs(await client.get(`${ZID}/users/${encodeURIComponent(u.id)}/groups`, { limit: '1000' }));
+      zid = { name: u.displayName || u.loginName, email: u.primaryEmail || u.loginName, groups: g.map((x) => x.name || x.displayName).filter(Boolean),
+        department: u.department && (u.department.displayName || u.department.name), idp: u.idp && (u.idp.displayName || u.idp.name) };
+    }
+  } catch (e) { zidErr = e; }
+  if (!zia && !zid) {
+    if (ziaErr && zidErr) throw new Error(`ZIA: ${ziaErr.message} · ZIdentity: ${zidErr.message}`);
+    if (ziaErr && !zidErr) return null;
+    if (zidErr && !ziaErr) return null;
+    return null;
+  }
+  const groups = [...new Set([...(zia ? zia.groups : []), ...(zid ? zid.groups : [])])];
+  return Object.assign({}, zid || {}, zia || {}, { groups, department: (zia && zia.department) || (zid && zid.department),
+    source: zia && zid ? 'ZIA + ZIdentity' : zia ? 'ZIA' : 'ZIdentity', ziaError: ziaErr && !zia ? ziaErr.message : undefined });
+}
+
+// ZPA SCIM group name by ID (rules reference SCIM groups by ID).
+async function zpaScimGroupName(client, id) {
+  const g = await client.get(`/zpa/userconfig/v1/customers/${client.cfg.zpaCustomerId}/scimgroup/${encodeURIComponent(id)}`);
+  return g && g.name;
 }
 
 // URL / IP category lookup (read-only POST, up to 100 entries per call). Pass rateRetries: 0 to get 429s back
@@ -342,4 +373,4 @@ async function refreshKeys(client, snap, keys) {
   snap.loadedAt = Date.now();
 }
 
-module.exports = { zpaWorks, zpaIdCandidates, jwtClaims, ZClient, loadSnapshot, refreshKeys, ZIA, zpaBase, CAC_TYPES, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, ENDPOINTS };
+module.exports = { zpaScimGroupName, zpaWorks, zpaIdCandidates, jwtClaims, ZClient, loadSnapshot, refreshKeys, ZIA, zpaBase, CAC_TYPES, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, ENDPOINTS };

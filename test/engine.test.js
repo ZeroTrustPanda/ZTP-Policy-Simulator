@@ -385,3 +385,37 @@ test('ZPA segment matching: exact FQDN only, wildcard is subdomains only, most s
   const w = z('*.hospital.example');                                                 // only narrower segments → ZIA decides
   assert.equal(w.verdict, 'NOT_A_ZPA_APP'); assert.equal(w.confidence, 'conditional');
 });
+
+test('user lookup falls back to ZIdentity when ZIA /users is blocked', async () => {
+  const { lookupUser } = require('../src/zscaler');
+  const calls = [];
+  const client = { get: async (p, q) => {
+    calls.push(p);
+    if (p === '/zia/api/v1/users') throw Object.assign(new Error('HTTP 403 GET /zia/api/v1/users: {"message":"Resource Access Blocked"}'), { status: 403 });
+    if (p === '/ziam/admin/api/v1/users') return { records: q.loginName ? [{ id: 'u1', loginName: 'jpuglise@zerotrusthospital.org', displayName: 'J Puglise', primaryEmail: 'jpuglise@zerotrusthospital.org' }] : [] };
+    if (p === '/ziam/admin/api/v1/users/u1/groups') return { records: [{ id: 'g1', name: 'Radiologists' }, { id: 'g2', name: 'All Staff' }] };
+    throw new Error('unexpected ' + p);
+  } };
+  const u = await lookupUser(client, 'jpuglise@zerotrusthospital.org');
+  assert.equal(u.source, 'ZIdentity');
+  assert.deepEqual(u.groups, ['Radiologists', 'All Staff']);
+  assert.match(u.ziaError, /403/);
+});
+
+test('ZPA access rules match SCIM groups and SAML email for a looked-up user', () => {
+  const { simulate } = require('../src/engine');
+  const data = JSON.parse(JSON.stringify(require('../src/demo-snapshot.json')));
+  data.zpaSegmentGroups.push({ id: '5050', name: 'Radiology' });
+  data.zpaApps.push({ id: '8010', name: 'Orthanc', domainNames: ['rad.zerotrusthospital.org'], segmentGroupId: '5050', tcpPortRanges: ['8042', '8042'] });
+  data.zpaSamlAttributes.push({ id: '3009', name: 'Email_ZIdentity', samlName: 'email' });
+  data.zpaAccessRules.unshift(
+    { id: 'r1', name: 'Radiologists to Orthanc', action: 'ALLOW', ruleOrder: '1', conditions: [{ operands: [{ objectType: 'APP_GROUP', rhs: '5050' }] }, { operands: [{ objectType: 'SCIM_GROUP', lhs: '123', rhs: '777' }] }] },
+    { id: 'r2', name: 'One user by email', action: 'ALLOW', ruleOrder: '2', conditions: [{ operands: [{ objectType: 'APP', rhs: '8010' }] }, { operands: [{ objectType: 'SAML', lhs: '3009', rhs: 'boss@zerotrusthospital.org' }] }] });
+  const z = (extra) => simulate({ data }, Object.assign({ target: M.parseTarget('rad.zerotrusthospital.org'), port: 8042, protocol: 'tcp', categories: [], resolvedIps: [], groups: [], notes: [], useZpa: true, zpaScimNames: { 777: 'Radiologists' } }, extra), {}).modules[0];
+  const none = z({});
+  assert.equal(none.confidence, 'conditional'); assert.match(none.reason, /Allowed for users who match "Radiologists to Orthanc"/);
+  assert.equal(z({ user: 'j@x', userResolved: { email: 'j@x' }, groups: ['Radiologists'] }).decidingRule.name, 'Radiologists to Orthanc');
+  assert.equal(z({ user: 'boss@zerotrusthospital.org', userResolved: { email: 'boss@zerotrusthospital.org' }, groups: ['Execs'] }).decidingRule.name, 'One user by email');
+  const no = z({ user: 'n@x', userResolved: { email: 'n@x' }, groups: ['Nurses'] });
+  assert.equal(no.verdict, 'BLOCK'); assert.equal(no.confidence, 'definite'); assert.match(no.note, /user does not match/);
+});

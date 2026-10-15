@@ -630,24 +630,50 @@ function zpaMatch(snap, ctx) {
 }
 // ZPA operand evaluation shared by access and client forwarding policy: app / segment group are known, the rest
 // (SCIM, SAML, posture, client type, trusted network…) depends on user and device context.
-function zpaEvalRules(rules, z) {
+function zpaEvalRules(rules, z, snap = {}, ctx = {}) {
   const appIds = z.apps.map((a) => String(a.id));
+  const appName = (id) => (arr(snap.zpaApps).find((a) => String(a.id) === String(id)) || {}).name;
+  const sgName = (id) => (arr(snap.zpaSegmentGroups).find((g) => String(g.id) === String(id)) || {}).name;
+  const idKnown = !!(ctx.userResolved || (ctx.groups && ctx.groups.length));
+  const userGroups = new Set(arr(ctx.groups).map(lc));
+  const email = lc((ctx.userResolved && ctx.userResolved.email) || ctx.user || '');
+  const here = z.apps.length ? `destination uses segment "${z.apps[0].name}"` : 'no segment';
   const sorted = sortRules(arr(rules).map((r) => Object.assign({ order: r.ruleOrder != null ? +r.ruleOrder : r.order }, r))).filter((r) => lc(r.disabled) !== '1' && lc(r.disabled) !== 'true');
   return sorted.map((r) => {
     const crits = [];
     for (const c of arr(r.conditions)) {
       const ops = arr(c.operands);
       const evalOp = (o) => {
-        const vals = arr(o.values || (o.rhs != null ? [o.rhs] : []));
-        if (o.objectType === 'APP') return vals.some((v) => appIds.includes(String(v))) ? 'match' : 'nomatch';
-        if (o.objectType === 'APP_GROUP') return vals.some((v) => z.groups.includes(String(v))) ? 'match' : 'nomatch';
-        return 'unknown';
+        const vals = arr(o.values || (o.rhs != null ? [o.rhs] : [])).map(String);
+        const t = o.objectType;
+        if (t === 'APP') return { s: vals.some((v) => appIds.includes(v)) ? 'match' : 'nomatch', d: `segment ${vals.map((v) => `"${o.name && vals.length === 1 ? o.name : appName(v) || v}"`).join(', ')}` };
+        if (t === 'APP_GROUP') return { s: vals.some((v) => z.groups.includes(v)) ? 'match' : 'nomatch', d: `segment group ${vals.map((v) => `"${o.name && vals.length === 1 ? o.name : sgName(v) || v}"`).join(', ')}` };
+        if (t === 'SCIM_GROUP') {
+          const names = vals.map((v) => (o.name && vals.length === 1 ? o.name : (ctx.zpaScimNames || {})[v]) || null);
+          const label = `SCIM group ${vals.map((v, i) => `"${names[i] || v}"`).join(', ')}`;
+          if (!idKnown || names.some((n) => !n)) return { s: 'unknown', d: label };
+          return { s: names.some((n) => userGroups.has(lc(n))) ? 'match' : 'nomatch', d: label };
+        }
+        if (t === 'SAML' || t === 'SCIM') {
+          const attr = arr(snap.zpaSamlAttributes).find((a) => String(a.id) === String(o.lhs)) || {};
+          const key = String(attr.samlName || attr.name || o.lhs || '');
+          const label = `${t === 'SAML' ? 'SAML' : 'SCIM'} attribute ${attr.name || key} = ${vals.join(', ')}`;
+          if (t === 'SAML' && /mail|upn|nameid|login|username/i.test(key) && email) return { s: vals.some((v) => lc(v) === email) ? 'match' : 'nomatch', d: label };
+          if (t === 'SAML' && /group|memberof/i.test(key) && idKnown) return { s: vals.some((v) => userGroups.has(lc(v))) ? 'match' : 'nomatch', d: label };
+          return { s: 'unknown', d: label };
+        }
+        return { s: 'unknown', d: `${t}${vals.length ? ' ' + vals.slice(0, 3).join(', ') : ''}` };
       };
-      const results = ops.map((o) => ({ o, s: evalOp(o) }));
+      const results = ops.map((o) => Object.assign({ o }, evalOp(o)));
       const types = [...new Set(ops.map((o) => o.objectType))].join('/');
       let status = results.some((x) => x.s === 'match') ? 'match' : results.some((x) => x.s === 'unknown') ? 'unknown' : 'nomatch';
       if (c.operator === 'AND') status = results.some((x) => x.s === 'nomatch') ? 'nomatch' : results.some((x) => x.s === 'unknown') ? 'unknown' : 'match';
-      crits.push({ field: types || 'condition', status, kind: /SCIM|SAML|IDP|USER/.test(types) ? 'identity' : 'other', scope: types, detail: status === 'unknown' ? `${types} condition depends on user/device context (not supplied)` : `${types} ${status}` });
+      if (c.negated === true || lc(c.negated) === 'true') status = status === 'match' ? 'nomatch' : status === 'nomatch' ? 'match' : status;
+      const what = results.map((x) => x.d).join(c.operator === 'AND' ? ' and ' : ' or ');
+      const isApp = /^(APP|APP_GROUP)(\/(APP|APP_GROUP))?$/.test(types);
+      const detail = isApp ? `${what} — ${here}${z.apps.length && z.apps[0].segmentGroupId ? ` (group "${sgName(z.apps[0].segmentGroupId) || z.apps[0].segmentGroupId}")` : ''}`
+        : status === 'unknown' ? `${what} — depends on user/device context${idKnown ? ' not available from the lookup' : ' (enter a user)'}` : `${what} — ${status === 'match' ? 'user matches' : 'user does not match'}`;
+      crits.push({ field: types || 'condition', status, kind: /SCIM|SAML|IDP|USER/.test(types) ? 'identity' : 'other', scope: types, detail });
     }
     const e = evalRule(r, crits);
     e.action = r.action;
@@ -696,7 +722,7 @@ function mZpa(snap, ctx) {
   } else out.stages.push({ step: 'Segment bypass', status: 'nomatch', detail: 'Never bypass' });
   // Client Forwarding Policy
   if (snap.zpaForwardingRules) {
-    const fr = zpaEvalRules(snap.zpaForwardingRules, z);
+    const fr = zpaEvalRules(snap.zpaForwardingRules, z, snap, ctx);
     const idx = fr.findIndex((e) => e.status === 'match');
     const pre = fr.slice(0, idx < 0 ? fr.length : idx).filter((e) => e.status === 'unknown');
     const isBypass = (a) => /BYPASS/i.test(a || '');
@@ -710,12 +736,19 @@ function mZpa(snap, ctx) {
   } else out.stages.push({ step: 'Client forwarding policy', status: 'unknown', detail: 'not loaded; assumed intercept' });
   // Access Policy
   if (!snap.zpaAccessRules) { out.stages.push({ step: 'Access policy', status: 'unknown', detail: 'not loaded' }); return Object.assign(out, { verdict: 'ALLOW', confidence: 'conditional', reason: 'ZPA carries it; access policy not loaded' }); }
-  const evaluated = zpaEvalRules(snap.zpaAccessRules, z);
+  const evaluated = zpaEvalRules(snap.zpaAccessRules, z, snap, ctx);
   const idx = evaluated.findIndex((e) => e.status === 'match');
   out.rules = evaluated; out.considered = evaluated.length;
   out.couldOverride = evaluated.slice(0, idx < 0 ? evaluated.length : idx).filter((e) => e.status === 'unknown');
   if (idx >= 0) { out.decidingRule = evaluated[idx]; out.verdict = /DENY/.test(evaluated[idx].action) ? 'BLOCK' : 'ALLOW'; out.reason = `Access rule "${evaluated[idx].name}" matched`; }
-  else { out.verdict = 'BLOCK'; out.reason = 'Matched an application segment but no access rule allows it (ZPA default deny)'; }
+  else {
+    out.verdict = 'BLOCK'; out.reason = 'Matched an application segment but no access rule allows it (ZPA default deny)';
+    const maybe = out.couldOverride.filter((e) => !/DENY/.test(e.action || ''));
+    if (maybe.length) out.reason = `No access rule allows everyone, so ZPA denies by default. Allowed for users who match ${maybe.slice(0, 3).map((e) => `"${e.name}" (${e.criteria.filter((c) => c.status === 'unknown').map((c) => c.detail.replace(/ — .*$/, '')).join('; ')})`).join(' or ')}. Enter the user to check.`;
+    const misses = evaluated.filter((e) => e.status === 'nomatch' && !/DENY/.test(e.action || '')).slice(0, 4)
+      .map((e) => `"${e.name}": ${(e.criteria.filter((c) => c.status === 'nomatch').map((c) => c.detail)[0]) || 'no match'}`);
+    out.note = [out.note, misses.length ? `Allow rules that missed — ${misses.join('; ')}` : evaluated.length ? '' : 'No access rules were loaded.'].filter(Boolean).join(' ');
+  }
   out.stages.push({ step: 'Access policy', status: idx >= 0 ? 'match' : 'nomatch', detail: out.reason });
   if (out.couldOverride.length || (out.fwdCouldOverride || []).length || out.onNet) out.confidence = 'conditional';
   return out;

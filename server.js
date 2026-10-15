@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const dns = require('dns').promises;
 const { exec } = require('child_process');
 
-const { ZClient, loadSnapshot, refreshKeys, ZIA, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, zpaWorks } = require('./src/zscaler');
+const { ZClient, loadSnapshot, refreshKeys, ZIA, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, zpaWorks, zpaScimGroupName } = require('./src/zscaler');
 const changes = require('./src/changes');
 const bulk = require('./src/bulk');
 const recommend = require('./src/recommend');
@@ -178,9 +178,22 @@ async function buildContext(s, b) {
       const k = String(b.user).toLowerCase();
       if (!s.userCache.has(k)) s.userCache.set(k, await lookupUser(s.client, b.user));
       const u = s.userCache.get(k);
-      if (u) { ctx.groups = u.groups; ctx.department = ctx.department || u.department; ctx.userResolved = u; }
-      else ctx.notes.push(`User "${b.user}" not found in ZIA; group/department rules will show as unknown unless you enter them.`);
+      if (u) {
+        ctx.groups = u.groups; ctx.department = ctx.department || u.department; ctx.userResolved = u;
+        ctx.notes.push(`User ${u.email || u.name} found in ${u.source}: ${u.groups.length} group${u.groups.length === 1 ? '' : 's'}${u.groups.length ? ' (' + u.groups.slice(0, 8).join(', ') + (u.groups.length > 8 ? ', …' : '') + ')' : ''}.`);
+        if (u.ziaError) ctx.notes.push(`ZIA's user list refused this API client (${/HTTP (\d+)/.exec(u.ziaError) ? /HTTP (\d+)/.exec(u.ziaError)[1] : 'error'}), so groups came from ZIdentity.`);
+      } else ctx.notes.push(`User "${b.user}" not found in ZIA or ZIdentity; group/department rules will show as unknown unless you enter them.`);
     } catch (e) { ctx.notes.push(`User lookup failed: ${e.message}`); }
+  }
+  // ZPA access rules reference SCIM groups by ID: resolve the names once per session so a user's groups can be matched.
+  const d = s.snap && s.snap.data;
+  if (d && (ctx.userResolved || ctx.groups.length) && !s.demo && s.client && s.client.cfg.zpaCustomerId && b.useZpa !== false) {
+    s.scimNames = s.scimNames || new Map();
+    const ids = new Set();
+    for (const r of [...(d.zpaAccessRules || []), ...(d.zpaForwardingRules || [])]) for (const c of r.conditions || []) for (const o of c.operands || [])
+      if (o.objectType === 'SCIM_GROUP' && !o.name) for (const v of (o.values || (o.rhs != null ? [o.rhs] : []))) if (!s.scimNames.has(String(v))) ids.add(String(v));
+    for (const id of [...ids].slice(0, 150)) { try { s.scimNames.set(id, await zpaScimGroupName(s.client, id)); } catch { s.scimNames.set(id, null); } }
+    ctx.zpaScimNames = Object.fromEntries(s.scimNames);
   }
   return ctx;
 }
