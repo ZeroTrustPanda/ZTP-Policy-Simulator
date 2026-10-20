@@ -1,4 +1,4 @@
-# ZeroTrustPanda ZS Policy Simulator v1.8.0
+# ZeroTrustPanda ZS Policy Simulator v1.8.1
 
 **Would this be allowed, blocked or bypassed — and by what?** A standalone simulator that pulls your live Zscaler policy over OneAPI and evaluates a transaction across ZIA, ZPA, Client Connector and Cloud & Branch Connector the way the cloud would, in rule order, then shows the deciding rule and everything else that could change the outcome.
 
@@ -7,12 +7,12 @@ Companion to the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustP
 ## Downloads
 | Platform | File |
 |---|---|
-| Windows x64 | [ZTP-Policy-Simulator-1.8.0-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.0/ZTP-Policy-Simulator-1.8.0-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
-| macOS Apple Silicon | [ZTP-Policy-Simulator-1.8.0-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.0/ZTP-Policy-Simulator-1.8.0-macos-arm64.zip) |
-| macOS Intel | [ZTP-Policy-Simulator-1.8.0-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.0/ZTP-Policy-Simulator-1.8.0-macos-x64.zip) |
+| Windows x64 | [ZTP-Policy-Simulator-1.8.1-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.1/ZTP-Policy-Simulator-1.8.1-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
+| macOS Apple Silicon | [ZTP-Policy-Simulator-1.8.1-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.1/ZTP-Policy-Simulator-1.8.1-macos-arm64.zip) |
+| macOS Intel | [ZTP-Policy-Simulator-1.8.1-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.1/ZTP-Policy-Simulator-1.8.1-macos-x64.zip) |
 | Source | clone the repo, or GitHub's "Source code" download on the release |
 
-Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.0/SHA256SUMS.txt)
+Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.1/SHA256SUMS.txt)
 
 No install, no Node.js required. Run it and it opens `http://127.0.0.1:8787`.
 macOS builds are unsigned — before first run: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`.
@@ -110,6 +110,14 @@ Port from the URL scheme (hostnames assume HTTPS/443) · network service and app
 - Cloud & Branch Connector support follows Zscaler's API reference and SDK; it was tested against sample policies, not yet a live connector tenant. When a workload group has several tag sets joined by different AND/OR operators, check one against the console.
 - No per-transaction log lookup: the console's transaction-log endpoints refuse API-client tokens. Use the console's Web / Firewall Insights logs for per-transaction proof.
 - ZCC field names follow the shapes verified by the Policy Wizard; report any app profile that shows "no forwarding profile linked".
+
+## Changes in 1.8.1
+- **Update prompt**, like the Policy Wizard. On start the simulator compares its version with the one on GitHub (`package.json` on main, cached for an hour). If a newer one is out it shows **⬆ Update available: vX** in the header and a prompt with:
+  - **Download for Windows / macOS (Apple Silicon) / macOS (Intel)**, the zip for this computer;
+  - **What's new**, the release page;
+  - **Remind me later** (until the next start) or **Skip this version**.
+
+  Nothing is downloaded or replaced automatically. If GitHub can't be reached the check stays quiet. Set `NO_UPDATE_CHECK=1` to turn it off.
 
 ## Changes in 1.8.0
 - **Workload traffic (Cloud & Branch Connector).** A new **Traffic from** switch on Simulate: *User device (Client Connector)* or *Workload (Cloud / Branch Connector)*. For a workload, enter any of:

@@ -50,6 +50,8 @@ function snapInfo(s) {
 }
 
 app.get('/api/version', (req, res) => res.json({ version: VERSION }));
+// Is a newer version on GitHub? (cached for an hour; NO_UPDATE_CHECK=1 turns it off)
+app.get('/api/update-check', wrap(async (req, res) => res.json(await require('./src/update').checkUpdate(VERSION, { force: req.query.force === '1' }))));
 
 // Step 1: authenticate and probe what the API client can reach. Does NOT load policy.
 app.post('/api/connect', wrap(async (req, res) => {

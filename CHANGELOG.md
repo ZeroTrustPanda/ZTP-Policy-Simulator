@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.8.1 — 2026-10-20
+- Update check against GitHub (header badge + prompt with the download for this platform, remind later / skip version, `NO_UPDATE_CHECK=1`).
+
 ## 1.8.0 — 2026-10-20
 - Workload traffic: "Traffic from" switch (user device / workload); workload source IP, tags, workload group, connector group and type.
 - Cloud & Branch Connector product: forwarding rules (ecRules/ecRdr), workload groups, connector groups, gateways, ZTW IP groups and network services; ZIA workload groups.

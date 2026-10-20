@@ -26,6 +26,8 @@ body { font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-
 .header-brand h1 { font-size: 15px; font-weight: 600; background: linear-gradient(135deg, var(--text-primary), var(--accent-cyan)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 .tag { font-size: 10px; padding: 2px 8px; border-radius: 4px; background: var(--accent-blue-dim); color: var(--accent-blue); font-weight: 600; letter-spacing: .5px; text-transform: uppercase; }
 .header-right { display: flex; align-items: center; gap: 10px; }
+.upd-toast { position: fixed; right: 20px; bottom: 20px; z-index: 1000; width: 340px; max-width: calc(100vw - 32px); background: var(--bg-card, #1e293b); color: var(--text-primary); border: 1px solid var(--accent-amber, #f59e0b); border-radius: 12px; padding: 14px 16px; box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+.upd-toast .ut-h { font-weight: 700; margin-bottom: 4px; } .upd-toast .ut-b { font-size: 13px; } .upd-toast .ut-a { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; } .upd-toast .ut-f { margin-top: 8px; font-size: 12px; } .upd-toast a.btn { text-decoration: none; }
 .auth-badge { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; }
 .auth-badge.connected { background: var(--accent-green-dim); color: var(--accent-green); }
 .auth-badge.disconnected { background: var(--accent-red-dim); color: var(--accent-red); }
@@ -250,6 +252,7 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
       <div class="logo">🐼</div>
       <div><h1>ZeroTrustPanda ZS Policy Simulator</h1></div>
       <span class="tag" id="ver">v</span>
+      <button class="tag hidden" id="updBadge" style="background:var(--accent-amber);color:#111;border:0;cursor:pointer;font-weight:600" title="A newer version is on GitHub">⬆ Update available</button>
     </div>
     <div class="header-right">
       <div class="auth-badge hidden" id="pendingBadge" style="background:var(--accent-amber-dim);color:#fcd34d;cursor:pointer" title="Saved policy changes are not active yet"><span class="dot"></span>Changes pending activation</div>
@@ -546,6 +549,32 @@ async function api(path, body) {
   return j;
 }
 fetch('/api/version').then((r) => r.json()).then((j) => { $('ver').textContent = 'v' + j.version; }).catch(() => {});
+// ---------- update prompt: newer version on GitHub ----------
+let upd = null;
+function showUpdate(force) {
+  if (!upd || !upd.newer) return;
+  let skipped = null; try { skipped = localStorage.getItem('ztp-sim.skipVersion'); } catch {}
+  $('updBadge').textContent = `⬆ Update available: v${upd.latest}`; $('updBadge').classList.remove('hidden');
+  if (!force && (skipped === upd.latest || sessionStorage.getItem('ztp-sim.updLater') === upd.latest)) return;
+  const d = upd.download;
+  const box = document.createElement('div');
+  box.id = 'updToast'; box.className = 'upd-toast'; box.setAttribute('role', 'dialog');
+  box.innerHTML = `<div class="ut-h">⬆ Update available</div>
+    <div class="ut-b">Version <b>${esc(upd.latest)}</b> is out. You're running ${esc(upd.current)}.</div>
+    <div class="ut-a">${d ? `<a class="btn btn-primary btn-sm" href="${esc(d.url)}" target="_blank" rel="noreferrer">Download for ${esc(d.platform.replace('windows-x64', 'Windows').replace('macos-arm64', 'macOS (Apple Silicon)').replace('macos-x64', 'macOS (Intel)'))}</a>` : `<a class="btn btn-primary btn-sm" href="${esc(upd.allDownloads)}" target="_blank" rel="noreferrer">Downloads</a>`}
+      <a class="btn btn-ghost btn-sm" href="${esc(upd.releaseUrl)}" target="_blank" rel="noreferrer">What's new</a></div>
+    <div class="ut-f"><button class="linkbtn" data-act="later">Remind me later</button> · <button class="linkbtn" data-act="skip">Skip this version</button></div>
+    <div class="form-hint" style="margin-top:6px">Unzip it and run the new file. Close this copy first so it can use the same port; your saved snapshots stay where they are.</div>`;
+  const old = $('updToast'); if (old) old.remove();
+  document.body.appendChild(box);
+  box.addEventListener('click', (e) => {
+    const a = e.target.dataset && e.target.dataset.act;
+    if (a === 'skip') { try { localStorage.setItem('ztp-sim.skipVersion', upd.latest); } catch {} box.remove(); }
+    if (a === 'later') { try { sessionStorage.setItem('ztp-sim.updLater', upd.latest); } catch {} box.remove(); }
+  });
+}
+$('updBadge').onclick = () => showUpdate(true);
+fetch('/api/update-check').then((r) => r.json()).then((j) => { upd = j; showUpdate(false); }).catch(() => {});
 function msg(id, m, ok) { $(id).innerHTML = ok ? esc(m) : `<span class="err">${esc(m)}</span>`; }
 
 // ---------- steps ----------
