@@ -1,0 +1,3 @@
+6f1f5701f65c58eabe4faf999ff49b29da0c8f8790fcb2f42521aa4874d68ffb  ZTP-Policy-Simulator-1.8.2-macos-arm64.zip
+b7ae098d0b58e945a0804571d2abcb29dfebe5ade2032ef134387ff684cb522d  ZTP-Policy-Simulator-1.8.2-macos-x64.zip
+4433da2a13829c3c0c9de673eb96ee5ba1d53ff82a7ea45ff0ed2714c439c583  ZTP-Policy-Simulator-1.8.2-windows-x64.zip

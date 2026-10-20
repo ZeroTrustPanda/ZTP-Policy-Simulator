@@ -1,4 +1,4 @@
-# ZeroTrustPanda ZS Policy Simulator v1.8.1
+# ZeroTrustPanda ZS Policy Simulator v1.8.2
 
 **Would this be allowed, blocked or bypassed — and by what?** A standalone simulator that pulls your live Zscaler policy over OneAPI and evaluates a transaction across ZIA, ZPA, Client Connector and Cloud & Branch Connector the way the cloud would, in rule order, then shows the deciding rule and everything else that could change the outcome.
 
@@ -7,12 +7,12 @@ Companion to the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustP
 ## Downloads
 | Platform | File |
 |---|---|
-| Windows x64 | [ZTP-Policy-Simulator-1.8.1-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.1/ZTP-Policy-Simulator-1.8.1-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
-| macOS Apple Silicon | [ZTP-Policy-Simulator-1.8.1-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.1/ZTP-Policy-Simulator-1.8.1-macos-arm64.zip) |
-| macOS Intel | [ZTP-Policy-Simulator-1.8.1-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.1/ZTP-Policy-Simulator-1.8.1-macos-x64.zip) |
+| Windows x64 | [ZTP-Policy-Simulator-1.8.2-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.2/ZTP-Policy-Simulator-1.8.2-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
+| macOS Apple Silicon | [ZTP-Policy-Simulator-1.8.2-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.2/ZTP-Policy-Simulator-1.8.2-macos-arm64.zip) |
+| macOS Intel | [ZTP-Policy-Simulator-1.8.2-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.2/ZTP-Policy-Simulator-1.8.2-macos-x64.zip) |
 | Source | clone the repo, or GitHub's "Source code" download on the release |
 
-Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.1/SHA256SUMS.txt)
+Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.2/SHA256SUMS.txt)
 
 No install, no Node.js required. Run it and it opens `http://127.0.0.1:8787`.
 macOS builds are unsigned — before first run: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`.
@@ -110,6 +110,17 @@ Port from the URL scheme (hostnames assume HTTPS/443) · network service and app
 - Cloud & Branch Connector support follows Zscaler's API reference and SDK; it was tested against sample policies, not yet a live connector tenant. When a workload group has several tag sets joined by different AND/OR operators, check one against the console.
 - No per-transaction log lookup: the console's transaction-log endpoints refuse API-client tokens. Use the console's Web / Firewall Insights logs for per-transaction proof.
 - ZCC field names follow the shapes verified by the Policy Wizard; report any app profile that shows "no forwarding profile linked".
+
+## Changes in 1.8.2
+Fixes from the first run against a live tenant (ZTH, Branch Connector):
+- **Connector rule order:** the predefined rules now run in Zscaler's order, so *ZPA Pool For Stray Traffic* (order −2) comes before *Default Forwarding Rule* (order −1).
+- ***ZPA Pool For Stray Traffic*** (Drop) applies only to destinations in the connector's ZPA IP pool (100.64.0.0/10 assumed). The API returns it with no criteria, so before this fix it would have dropped everything.
+- **Destination groups the API returns empty**, such as the auto-created *ZPA Brokers* group (type `DSTN_OTHER`), no longer match every destination. *ZPA Brokers* matches `*.zpath.net` and `*.private.zscaler.com`; other empty groups show as "can't check". This fixes *Client Connector to ZPA* (Direct) catching all traffic.
+- ***ZPA Edge App Segment*** in a ZPA forwarding rule means every ZPA application segment, so ZPA apps from a workload go to the ZPA access policy.
+- **Destination groups** now also use their `ipAddresses`, IP and URL categories and countries.
+- **App service groups** (e.g. `ZSCALER_CLOUD_ENDPOINTS`) are flagged as not evaluated instead of being ignored.
+- **Not subscribed:** policy sets the tenant doesn't license (e.g. workload groups without a Workload Connector subscription) show as *not subscribed* instead of *failed*, and the workload panel says to simulate by source IP.
+- **Recent changes (ZIA audit log):** an early `404 No Report to download` is retried instead of failing straight away.
 
 ## Changes in 1.8.1
 - **Update prompt**, like the Policy Wizard. On start the simulator compares its version with the one on GitHub (`package.json` on main, cached for an hour). If a newer one is out it shows **⬆ Update available: vX** in the header and a prompt with:

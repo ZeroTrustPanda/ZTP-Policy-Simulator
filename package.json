@@ -1,6 +1,6 @@
 {
   "name": "ztp-policy-simulator",
-  "version": "1.8.1",
+  "version": "1.8.2",
   "description": "ZeroTrustPanda ZS Policy Simulator \u2014 standalone Zscaler policy simulator (ZIA, ZPA, Client Connector)",
   "main": "server.js",
   "bin": "server.js",

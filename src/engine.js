@@ -111,15 +111,33 @@ function critSourceIp(rule, ctx, snap) {
 // Destination: addresses (ip/cidr/range/fqdn), ip groups, ip categories, countries (OR'd together).
 function critDest(rule, ctx, snap) {
   const addrs = [...arr(rule.destAddresses)];
-  const groupNames = [];
+  const groupNames = [], emptyGroups = [];
+  const gCats = [], gCountries = [];
   for (const g of arr(rule.destIpGroups)) {
-    const full = (snap.ipDestinationGroups || []).find((x) => x.id === g.id);
-    groupNames.push(g.name || (full && full.name) || g.id);
-    if (full) addrs.push(...arr(full.addresses));
+    const full = (snap.ipDestinationGroups || []).find((x) => String(x.id) === String(g.id));
+    const name = g.name || (full && full.name) || g.id;
+    groupNames.push(name);
+    if (!full) continue;
+    const a = [...arr(full.addresses), ...arr(full.ipAddresses)];
+    addrs.push(...a);
+    gCats.push(...arr(full.ipCategories), ...arr(full.urlCategories)); gCountries.push(...arr(full.countries));
+    if (!a.length && !arr(full.ipCategories).length && !arr(full.urlCategories).length && !arr(full.countries).length) emptyGroups.push({ name, type: full.type });
   }
-  const cats = nonAny(arr(rule.destIpCategories).map((c) => (c && c.name) || c));
-  const countries = nonAny(arr(rule.destCountries));
-  if (!addrs.length && !cats.length && !countries.length) return { field: 'destination', status: 'any', detail: 'not restricted' };
+  const cats = nonAny([...arr(rule.destIpCategories), ...gCats].map((c) => (c && c.name) || c));
+  const countries = nonAny([...arr(rule.destCountries), ...gCountries]);
+  if (!addrs.length && !cats.length && !countries.length) {
+    if (!emptyGroups.length) return { field: 'destination', status: 'any', detail: 'not restricted' };
+    // A group the API returns with no entries (e.g. the auto-created "ZPA Brokers" group, type DSTN_OTHER): its
+    // members are managed by Zscaler. ZPA brokers are *.zpath.net / *.private.zscaler.com.
+    const names = emptyGroups.map((g) => g.name).join(', ');
+    if (emptyGroups.some((g) => /zpa broker/i.test(g.name))) {
+      const t = ctx.target;
+      if (!t) return { field: 'destination', status: 'unknown', scope: `Destination group ${names}`, detail: `rule applies to ${names} (ZPA brokers) — no destination entered` };
+      const broker = !t.isIp && /(^|\.)(zpath\.net|private\.zscaler\.com)$/i.test(t.host);
+      return { field: 'destination', status: broker ? 'match' : 'nomatch', detail: broker ? `${t.host} is a ZPA broker (${names})` : `${t.host} is not a ZPA broker (${names}: *.zpath.net, *.private.zscaler.com)` };
+    }
+    return { field: 'destination', status: 'unknown', scope: `Destination group ${names}`, detail: `destination group ${names} has no entries the API returns (managed by Zscaler) — can't check membership` };
+  }
   const t = ctx.target;
   const hits = [];
   let sawUnknown = false;
@@ -949,9 +967,14 @@ function critZpaSegments(rule, ctx, z) {
   if (!segs.length && !sgs.length) return null;
   const list = [...names(segs), ...names(sgs)].slice(0, 4).join(', ');
   if (!z) return { field: 'ZPA segment', status: 'unknown', kind: 'input', scope: `ZPA segment ${list}`, detail: `rule forwards ZPA segments ${list}; ZPA segments not loaded` };
+  // "ZPA Edge App Segment" is the connector's built-in reference to every ZPA application segment.
+  const allApps = segs.find((x) => /^zpa edge app segment$/i.test(String(x.name || '')));
+  if (allApps) return z.apps.length ? { field: 'ZPA segment', status: 'match', detail: `destination is ZPA segment "${z.apps[0].name}" (${allApps.name} covers every ZPA application)` } : { field: 'ZPA segment', status: 'nomatch', detail: `destination is not a ZPA application segment (${allApps.name} covers ZPA applications only)` };
   const hit = z.apps.find((a) => segs.some((x) => lc(x.name) === lc(a.name) || String(x.externalId || x.id) === String(a.id)));
   const ghit = !hit && sgs.length && z.groups.length ? sgs.find((x) => z.groups.includes(String(x.externalId || x.id))) : null;
   if (hit || ghit) return { field: 'ZPA segment', status: 'match', detail: hit ? `destination is ZPA segment "${hit.name}"` : `destination is in segment group "${ghit.name}"` };
+  const known = (x) => arr(ctx._zpaAppNames).some((n) => lc(n) === lc(x.name));
+  if (z.apps.length && segs.length && !segs.some(known)) return { field: 'ZPA segment', status: 'unknown', kind: 'input', scope: `ZPA segment ${list}`, detail: `destination is ZPA segment "${z.apps[0].name}"; the rule forwards ${list}, which isn't a ZPA segment by that name — check which ZPA applications it covers` };
   return { field: 'ZPA segment', status: 'nomatch', detail: z.apps.length ? `destination is segment "${z.apps[0].name}", not ${list}` : `destination is not in ZPA segment ${list}` };
 }
 function mConnectorForwarding(data, ctx) {
@@ -963,12 +986,31 @@ function mConnectorForwarding(data, ctx) {
     networkServices: data.ztwNetworkServices || data.networkServices, networkServiceGroups: data.ztwNetworkServiceGroups || data.networkServiceGroups,
   });
   const z = data.zpaApps ? zpaMatch(data, ctx) : null;
-  const res = runModule(CONN_MODULE, all, (r) => [
+  ctx._zpaAppNames = arr(data.zpaApps).map((a) => a.name);
+  // Rule order: 1, 2, 3 … then the predefined rules with negative orders (-2 "ZPA Pool For Stray Traffic" before -1 "Default").
+  const rank = (r) => { const o = Number(r.order); return Number.isFinite(o) && o >= 0 ? o : 1e9 + (Number.isFinite(o) ? o : 0); };
+  all.sort((a, b) => rank(a) - rank(b));
+  all.forEach((r, i) => { r._seq = i; });
+  const ZPA_POOL = ['100.64.0.0/10'];
+  const stray = (r) => {
+    // The predefined "ZPA Pool For Stray Traffic" rule has no criteria in the API: it drops traffic to the connector's
+    // ZPA IP pool (synthetic IPs) that isn't for a known ZPA application.
+    if (!(Number(r.order) === -2 || /stray traffic/i.test(r.name || ''))) return null;
+    const t = ctx.target;
+    if (!t) return { field: 'destination', status: 'unknown', scope: 'Destination in the ZPA IP pool', detail: 'applies to traffic to the ZPA IP pool (synthetic IPs) — no destination entered' };
+    const ips = t.isIp ? [t.host] : ctx.resolvedIps || [];
+    const hit = ips.find((ip) => M.ipInList(ip, ZPA_POOL).rel === 'match');
+    return { field: 'destination', status: hit ? 'match' : 'nomatch', detail: hit ? `${hit} is in the ZPA IP pool (${ZPA_POOL[0]}, assumed)` : `${t.host} is not in the ZPA IP pool (${ZPA_POOL[0]}, assumed)` };
+  };
+  const appSvc = (r) => (arr(r.appServiceGroups).length ? { field: 'app service group', status: 'unknown', kind: 'input', scope: `App service group ${names(r.appServiceGroups).join(', ')}`, detail: `rule applies to app service group ${names(r.appServiceGroups).join(', ')} (Zscaler-managed destinations) — not evaluated` } : null);
+  const res = runModule(CONN_MODULE, all.map((r) => Object.assign({}, r, { order: r._seq, _order: r.order })), (r) => [
+    stray(r), appSvc(r),
     critSourceIp(r, ctx, view), W.critWorkload(r, ctx, 'srcWorkloadGroups'), critEcGroup(r, ctx), critLocation(r, ctx),
     critDest(r, ctx, view), critUrlCategories(r, ctx, 'resCategories'), critServices(r, ctx, view), critApps(r, ctx, view), critTimeWindows(r),
     /^(ZPA|ECZPA)$/i.test(r.forwardMethod || '') ? critZpaSegments(r, ctx, z) : null,
   ].filter(Boolean), { defaultReason: 'no forwarding rule matched (default: forwarded to ZIA)' });
   // runModule compares raw actions; connector rules carry forwardMethod instead, so map each rule's outcome.
+  for (const e of res.rules) { const r0 = all.find((x) => String(x.id) === String(e.id)); if (r0) e.order = r0.order; }
   const src = new Map(all.map((r) => [String(r.id), r]));
   const outcome = (e) => fwdOf(src.get(String(e.id)) || {});
   for (const e of res.rules) {

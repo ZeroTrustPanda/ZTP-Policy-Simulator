@@ -620,7 +620,7 @@ function setLoaded(snap) {
     $('locList').innerHTML = (snap.locations || []).map((l) => `<option value="${esc(l)}">`).join('');
     $('wlGroupList').innerHTML = (snap.workloadGroups || []).map((l) => `<option value="${esc(l)}">`).join('');
     $('ecGroupList').innerHTML = (snap.ecGroups || []).map((l) => `<option value="${esc(l)}">`).join('');
-    $('wlNote').textContent = snap.connector ? `${(snap.workloadGroups || []).length} workload group(s) and ${(snap.ecGroups || []).length} connector group(s) loaded.` : (snap.workloadGroups || []).length ? `${snap.workloadGroups.length} workload group(s) loaded. Cloud & Branch Connector forwarding rules aren't loaded, so forwarding to ZIA is assumed.` : 'Cloud & Branch Connector policy isn\'t loaded. Tick it in Load policies to evaluate connector forwarding rules.';
+    $('wlNote').textContent = (snap.notSubscribed || []).some((k) => /orkloadGroups/.test(k)) ? `Workload groups aren't subscribed on this tenant, so rules can't use them; simulate by source IP. ${(snap.ecGroups || []).length} connector group(s) loaded.` : snap.connector ? `${(snap.workloadGroups || []).length} workload group(s) and ${(snap.ecGroups || []).length} connector group(s) loaded.` : (snap.workloadGroups || []).length ? `${snap.workloadGroups.length} workload group(s) loaded. Cloud & Branch Connector forwarding rules aren't loaded, so forwarding to ZIA is assumed.` : 'Cloud & Branch Connector policy isn\'t loaded. Tick it in Load policies to evaluate connector forwarding rules.';
   }
   refreshSidebar();
   if (snap) setTimeout(loadHealth, 0); else if ($('healthBar')) $('healthBar').innerHTML = '';
@@ -702,7 +702,7 @@ $('btnSaveSnap').onclick = async () => {
 
 // ---------- step 2 ----------
 function renderJob(job) {
-  const icon = { ok: '<span class="badge b-green">loaded</span>', error: '<span class="badge b-red">failed</span>', loading: '<span class="spinner"></span>', pending: '<span class="badge b-slate">waiting</span>' };
+  const icon = { ok: '<span class="badge b-green">loaded</span>', error: '<span class="badge b-red">failed</span>', na: '<span class="badge b-slate">not subscribed</span>', loading: '<span class="spinner"></span>', pending: '<span class="badge b-slate">waiting</span>' };
   const rows = Object.values(job.items || {}).map((x) => `<tr><td>${esc(x.label)}</td><td>${icon[x.state] || esc(x.state)}</td><td style="text-align:right">${x.count != null ? esc(x.count) : ''}</td><td><span class="form-hint">${esc(x.error || '')}</span></td></tr>`).join('');
   $('loadTable').innerHTML = rows ? `<table><tr><th>Policy set</th><th>Status</th><th style="text-align:right">Objects</th><th>Detail</th></tr>${rows}</table>` : '';
 }
@@ -718,8 +718,8 @@ $('btnLoad').onclick = async () => {
       const st = await api('/api/load-status');
       if (st.job) renderJob(st.job);
       if (st.job && st.job.done) {
-        const items = Object.values(st.job.items || {}), bad = items.filter((i) => i.state === 'error').length;
-        $('loadMsg').innerHTML = st.job.error ? `<span class="err">${esc(st.job.error)}</span>` : `Loaded ${items.length - bad} of ${items.length} policy sets.` + (bad ? ` <span class="err">${bad} failed — those checks will show as not evaluated.</span>` : '');
+        const items = Object.values(st.job.items || {}), bad = items.filter((i) => i.state === 'error').length, na = items.filter((i) => i.state === 'na').length;
+        $('loadMsg').innerHTML = st.job.error ? `<span class="err">${esc(st.job.error)}</span>` : `Loaded ${items.length - bad - na} of ${items.length - na} policy sets.` + (na ? ` ${na} not subscribed on this tenant.` : '') + (bad ? ` <span class="err">${bad} failed — those checks will show as not evaluated.</span>` : '');
         setLoaded(st.snapshot); $('btnToSim').classList.remove('hidden'); break;
       }
     }

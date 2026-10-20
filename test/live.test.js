@@ -72,6 +72,17 @@ test('ZIA audit log: start, poll, download CSV with title lines, filter', async 
   assert.equal(live.filterAudit(r.entries, '').length, 2);
 });
 
+test('ZIA audit log: an early 404 "No Report to download" keeps polling', async () => {
+  let polls = 0;
+  const client = { request: async (m, p) => {
+    if (m === 'GET' && p.endsWith('/auditlogEntryReport')) { if (++polls < 3) throw Object.assign(new Error('HTTP 404 No Report to download'), { status: 404 }); return { status: 'COMPLETE' }; }
+    if (p.endsWith('/download')) return '"Time","Admin","Action","Category","Sub-Category","Resource","Result"\n"2026-10-19 10:00:00","a","UPDATE","Firewall Filtering","Firewall Rule","X","SUCCESS"\n';
+    return null;
+  } };
+  const r = await live.auditLog(client, { hours: 1, sleep: async () => {} });
+  assert.equal(r.entries.length, 1);
+});
+
 test('simulation scopes Client Connector profiles to the looked-up device', () => {
   const { simulate } = require('../src/engine'); const M = require('../src/matchers');
   const data = require('../src/demo-snapshot.json');

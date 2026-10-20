@@ -295,6 +295,14 @@ async function loadSnapshot(client, { groups = ['zia', 'zcc', 'zpa'], job } = {}
       snap.data[e.key] = d.data;
       if (job) Object.assign(job.items[e.key], { state: 'ok', count: Array.isArray(d.data) ? d.data.length : d.data ? 1 : 0, error: d.warning });
     } catch (err) {
+      // A feature the tenant doesn't license isn't a failure: record it, and treat that policy set as empty.
+      if (/NOT_SUBSCRIBED/.test(err.message)) {
+        const why = (err.message.match(/"message":"([^"]{0,140})/) || [])[1] || 'not subscribed';
+        (snap.notSubscribed = snap.notSubscribed || {})[e.key] = why;
+        snap.data[e.key] = [];
+        if (job) Object.assign(job.items[e.key], { state: 'na', count: 0, error: `Not subscribed on this tenant — ${why}` });
+        continue;
+      }
       snap.errors[e.key] = err.message;
       if (job) Object.assign(job.items[e.key], { state: 'error', error: err.message });
     }

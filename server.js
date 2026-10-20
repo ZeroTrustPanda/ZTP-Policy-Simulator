@@ -46,7 +46,7 @@ function counts(snap) {
 function snapInfo(s) {
   return s.snap ? { loadedAt: s.snap.loadedAt, counts: counts(s.snap), errors: s.snap.errors, locations: (s.snap.data.locations || []).map((l) => l.name).filter(Boolean),
     workloadGroups: require('./src/workload').allGroups(s.snap.data).map((g) => g.name).filter(Boolean), ecGroups: (s.snap.data.ztwEcGroups || []).map((g) => g.name).filter(Boolean),
-    connector: !!(s.snap.data.ztwForwardingRules || s.snap.data.ztwEcGroups) } : null;
+    connector: !!(s.snap.data.ztwForwardingRules || s.snap.data.ztwEcGroups), notSubscribed: Object.keys(s.snap.notSubscribed || {}) } : null;
 }
 
 app.get('/api/version', (req, res) => res.json({ version: VERSION }));

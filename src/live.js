@@ -203,11 +203,18 @@ async function auditLog(client, { hours = 24, wait = 60000, sleep = (ms) => new 
     if (e.status === 409 || /in progress|already/i.test(e.message)) { await client.request('DELETE', '/zia/api/v1/auditlogEntryReport').catch(() => {}); await sleep(1000); await client.request('POST', '/zia/api/v1/auditlogEntryReport', { body: { startTime: start, endTime: end } }); }
     else throw e;
   }
-  const t0 = Date.now(); let st = null;
+  const t0 = Date.now(); let st = null, reposted = false;
   for (;;) {
     await sleep(1500);
-    st = await client.request('GET', '/zia/api/v1/auditlogEntryReport').catch((e) => ({ status: 'ERROR', errorMessage: e.message }));
-    const s = String((st && st.status) || '').toUpperCase();
+    st = await client.request('GET', '/zia/api/v1/auditlogEntryReport').catch((e) => ({ status: e.status === 404 ? 'NOT_FOUND' : 'ERROR', errorMessage: e.message }));
+    let s = String((st && st.status) || '').toUpperCase();
+    // Right after the request ZIA can answer 404 "No Report to download" until the report is registered: keep polling,
+    // and ask for the report once more if it still isn't there after a few seconds.
+    if (s === 'NOT_FOUND') {
+      if (!reposted && Date.now() - t0 > 6000) { reposted = true; await client.request('POST', '/zia/api/v1/auditlogEntryReport', { body: { startTime: start, endTime: end } }).catch(() => {}); }
+      if (Date.now() - t0 < 20000) continue;
+      throw Object.assign(new Error('ZIA did not create the audit log report (404 "No Report to download"). The API client may need the audit log permission in ZIA (admin role → Audit Logs).'), { status: 502 });
+    }
     if (s === 'COMPLETE' || s === 'COMPLETED') break;
     if (s && s !== 'EXECUTING' && s !== 'IN_PROGRESS') throw Object.assign(new Error(`Audit log report ${s}: ${(st && (st.errorMessage || st.errorCode)) || ''}`.trim()), { status: 502 });
     if (Date.now() - t0 > wait) throw Object.assign(new Error('The audit log report is still building. Try again in a minute, or pick a shorter time range.'), { status: 504 });

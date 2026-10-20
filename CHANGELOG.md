@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.8.2 — 2026-10-20
+- Live-tenant fixes: predefined connector rule order (−2 before −1), ZPA Pool For Stray Traffic scoped to the ZPA IP pool, empty Zscaler-managed destination groups (ZPA Brokers) no longer match everything, ZPA Edge App Segment = all ZPA apps, app service groups flagged, NOT_SUBSCRIBED shown as not subscribed, audit-log 404 retry.
+
 ## 1.8.1 — 2026-10-20
 - Update check against GitHub (header badge + prompt with the download for this platform, remind later / skip version, `NO_UPDATE_CHECK=1`).
 

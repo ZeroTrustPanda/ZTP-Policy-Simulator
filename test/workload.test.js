@@ -84,3 +84,24 @@ test('source IP group sends medical devices direct; unknown workload context is 
   assert.equal(f.confidence, 'conditional');
   assert.ok(u.summary.alsoBasedOn.some((c) => c.kind === 'workload' && c.rule === 'Drop SMB from Prod' && c.action === 'BLOCK'));
 });
+
+test('live-tenant shapes: predefined rule order, ZPA pool stray rule, ZPA brokers group, ZPA Edge App Segment', () => {
+  const E = require('../src/engine');
+  const data = {
+    zpaApps: [{ id: '1', name: 'Rad', domainNames: ['rad.example.org'], tcpPortRanges: ['8042', '8042'] }],
+    ztwIpDestinationGroups: [{ id: 5, name: 'ZPA Brokers', type: 'DSTN_OTHER', addresses: [], ipAddresses: [] }],
+    ztwForwardingRules: [
+      { id: 1, name: 'Client Connector to ZPA', type: 'EC_RDR', order: 1, forwardMethod: 'DIRECT', state: 'ENABLED', destIpGroups: [{ id: 5, name: 'ZPA Brokers' }] },
+      { id: 2, name: 'ZPA Forwarding Rule', type: 'EC_RDR', order: 2, forwardMethod: 'ECZPA', state: 'ENABLED', zpaApplicationSegments: [{ id: 9, name: 'ZPA Edge App Segment', zpaId: 1 }] },
+      { id: 3, name: 'Default Forwarding Rule', type: 'EC_RDR', order: -1, forwardMethod: 'ZIA', state: 'ENABLED' },
+      { id: 4, name: 'ZPA Pool For Stray Traffic', type: 'EC_RDR', order: -2, forwardMethod: 'DROP', state: 'ENABLED' },
+    ],
+  };
+  const f = (target, port) => { const t = M.parseTarget(target); return E.mConnectorForwarding(data, { target: t, port, protocol: 'tcp', source: 'workload', groups: [], categories: [], resolvedIps: [], notes: [] }); };
+  assert.equal(f('www.cnn.com', 443).decidingRule.name, 'Default Forwarding Rule');
+  assert.equal(f('100.64.3.4', 443).decidingRule.name, 'ZPA Pool For Stray Traffic');
+  assert.equal(f('x.prod.zpath.net', 443).decidingRule.name, 'Client Connector to ZPA');
+  const z = f('rad.example.org', 8042);
+  assert.equal(z.decidingRule.name, 'ZPA Forwarding Rule'); assert.equal(z.verdict, 'VIA_ZPA');
+  assert.equal(z.decidingRule.order, 2);
+});
