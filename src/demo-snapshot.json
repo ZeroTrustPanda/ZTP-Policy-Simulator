@@ -111,6 +111,26 @@
    ]
   },
   {
+   "id": 25,
+   "name": "Block SSH from Prod Workloads",
+   "order": 4,
+   "rank": 7,
+   "state": "ENABLED",
+   "action": "BLOCK_DROP",
+   "nwServices": [
+    {
+     "id": 303,
+     "name": "SSH"
+    }
+   ],
+   "workloadGroups": [
+    {
+     "id": 9100,
+     "name": "AWS Prod Web"
+    }
+   ]
+  },
+  {
    "id": 24,
    "name": "Default Allow",
    "order": -1,
@@ -298,6 +318,17 @@
      "end": 139
     }
    ]
+  },
+  {
+   "id": 303,
+   "name": "SSH",
+   "tag": "SSH",
+   "destTcpPorts": [
+    {
+     "start": 22,
+     "end": 22
+    }
+   ]
   }
  ],
  "networkServiceGroups": [],
@@ -323,6 +354,14 @@
   {
    "id": 2,
    "name": "Road Warrior"
+  },
+  {
+   "id": 3,
+   "name": "AWS us-east-1"
+  },
+  {
+   "id": 4,
+   "name": "Clinic 12"
   }
  ],
  "zccPolicies": [
@@ -546,6 +585,37 @@
      ]
     }
    ]
+  },
+  {
+   "id": "8003",
+   "name": "Allow Lab Analyzers (Cloud Connector)",
+   "ruleOrder": "3",
+   "action": "ALLOW",
+   "conditions": [
+    {
+     "operator": "OR",
+     "operands": [
+      {
+       "objectType": "APP",
+       "values": [
+        "9004"
+       ],
+       "name": "Lab Systems"
+      }
+     ]
+    },
+    {
+     "operator": "OR",
+     "operands": [
+      {
+       "objectType": "CLIENT_TYPE",
+       "values": [
+        "zpn_client_type_edge_connector"
+       ]
+      }
+     ]
+    }
+   ]
   }
  ],
  "zccAppServices": [
@@ -589,12 +659,24 @@
   {
    "id": "7001",
    "name": "Imaging Connectors",
-   "enabled": true
+   "enabled": true,
+   "appConnectorGroups": [
+    {
+     "id": "6101",
+     "name": "Imaging AC Group"
+    }
+   ]
   },
   {
    "id": "7002",
    "name": "Core Connectors",
-   "enabled": true
+   "enabled": true,
+   "appConnectorGroups": [
+    {
+     "id": "6102",
+     "name": "Core AC Group"
+    }
+   ]
   }
  ],
  "zpaAccessPolicySet": {
@@ -702,6 +784,454 @@
     "Guests"
    ],
    "department": "Facilities"
+  }
+ ],
+ "zpaConnectorGroups": [
+  {
+   "id": "6101",
+   "name": "Imaging AC Group",
+   "enabled": true,
+   "location": "Main Hospital DC"
+  },
+  {
+   "id": "6102",
+   "name": "Core AC Group",
+   "enabled": true,
+   "location": "Main Hospital DC"
+  }
+ ],
+ "zpaConnectors": [
+  {
+   "id": "6201",
+   "name": "ac-imaging-01",
+   "enabled": true,
+   "appConnectorGroupId": "6101",
+   "controlChannelStatus": "ZPN_STATUS_AUTHENTICATED",
+   "currentVersion": "24.302.1",
+   "lastBrokerConnectTime": "1792182564000000",
+   "privateIp": "10.60.1.11"
+  },
+  {
+   "id": "6202",
+   "name": "ac-imaging-02",
+   "enabled": true,
+   "appConnectorGroupId": "6101",
+   "controlChannelStatus": "ZPN_STATUS_AUTHENTICATED",
+   "currentVersion": "24.302.1",
+   "lastBrokerConnectTime": "1792182564000000",
+   "privateIp": "10.60.1.12"
+  },
+  {
+   "id": "6203",
+   "name": "ac-core-01",
+   "enabled": true,
+   "appConnectorGroupId": "6102",
+   "controlChannelStatus": "ZPN_STATUS_AUTHENTICATED",
+   "currentVersion": "24.302.1",
+   "lastBrokerConnectTime": "1792438164000000",
+   "privateIp": "10.50.1.21"
+  },
+  {
+   "id": "6204",
+   "name": "ac-core-02",
+   "enabled": true,
+   "appConnectorGroupId": "6102",
+   "controlChannelStatus": "ZPN_STATUS_DISCONNECTED",
+   "currentVersion": "24.198.3",
+   "lastBrokerDisconnectTime": "1792434564000000",
+   "privateIp": "10.50.1.22"
+  }
+ ],
+ "zpaBaCerts": [
+  {
+   "id": "6301",
+   "name": "portal.hospital.example",
+   "validToInEpochSec": "1809721764"
+  }
+ ],
+ "zpaEnrollmentCerts": [
+  {
+   "id": "6401",
+   "name": "Connector",
+   "validToInEpochSec": "1794256164"
+  },
+  {
+   "id": "6402",
+   "name": "Root",
+   "validToInEpochSec": "2051641764"
+  }
+ ],
+ "demoDevices": {
+  "dana.lee@hospital.example": [
+   {
+    "udid": "D1-WIN",
+    "hostname": "RAD-WS-014",
+    "os": "Windows",
+    "osType": 3,
+    "osVersion": "Windows 11 23H2",
+    "zccVersion": "4.6.0.168",
+    "profile": "Corp Windows",
+    "registration": "Registered",
+    "health": {
+     "profile": "Corp Windows",
+     "tunnelVersion": "Z-Tunnel 2.0",
+     "zia": {
+      "enabled": true,
+      "health": "Active"
+     },
+     "zpa": {
+      "enabled": true,
+      "health": "Active"
+     },
+     "zdx": {
+      "enabled": true,
+      "health": "Active"
+     }
+    },
+    "lastSeenAgo": 609740
+   },
+   {
+    "udid": "D1-MAC",
+    "hostname": "DLEE-MBP",
+    "os": "macOS",
+    "osType": 4,
+    "osVersion": "macOS 15.6",
+    "zccVersion": "4.5.2.73",
+    "profile": "Corp macOS",
+    "registration": "Registered",
+    "health": {
+     "profile": "Corp macOS",
+     "tunnelVersion": "Z-Tunnel 2.0",
+     "zia": {
+      "enabled": true,
+      "health": "Active"
+     },
+     "zpa": {
+      "enabled": true,
+      "health": "Active"
+     },
+     "zdx": {
+      "enabled": true,
+      "health": "Active"
+     }
+    },
+    "lastSeenAgo": 172809740
+   }
+  ],
+  "sam.kim@hospital.example": [
+   {
+    "udid": "S1-WIN",
+    "hostname": "NURSE-CART-07",
+    "os": "Windows",
+    "osType": 3,
+    "osVersion": "Windows 10 22H2",
+    "zccVersion": "4.3.0.226",
+    "profile": "Corp Windows",
+    "registration": "Registered",
+    "health": {
+     "profile": "Corp Windows",
+     "tunnelVersion": "Z-Tunnel 1.0",
+     "zia": {
+      "enabled": true,
+      "health": "Active"
+     },
+     "zpa": {
+      "enabled": false,
+      "health": null
+     },
+     "zdx": {
+      "enabled": true,
+      "health": "Active"
+     }
+    },
+    "lastSeenAgo": 1809740
+   }
+  ]
+ },
+ "demoAudit": [
+  {
+   "Admin": "netadmin@hospital.example",
+   "Action": "UPDATE",
+   "Category": "Firewall Filtering",
+   "Sub-Category": "Firewall Rule",
+   "Resource": "Block Telnet",
+   "Result": "SUCCESS",
+   "Client IP": "10.1.1.20",
+   "agoHours": 2
+  },
+  {
+   "Admin": "secops@hospital.example",
+   "Action": "CREATE",
+   "Category": "URL Filtering",
+   "Sub-Category": "URL Filtering Rule",
+   "Resource": "Block Custom Denylist",
+   "Result": "SUCCESS",
+   "Client IP": "10.1.1.31",
+   "agoHours": 5
+  },
+  {
+   "Admin": "netadmin@hospital.example",
+   "Action": "ACTIVATE",
+   "Category": "Activation",
+   "Sub-Category": "Activation",
+   "Resource": "",
+   "Result": "SUCCESS",
+   "Client IP": "10.1.1.20",
+   "agoHours": 20
+  }
+ ],
+ "workloadGroups": [
+  {
+   "id": 9100,
+   "name": "AWS Prod Web",
+   "description": "Production web tier in AWS",
+   "expressionJson": {
+    "expressionContainers": [
+     {
+      "tagType": "VPC",
+      "operator": "AND",
+      "tagContainer": {
+       "tags": [
+        {
+         "key": "Vpc-id",
+         "value": "vpc-0prod1"
+        }
+       ],
+       "operator": "AND"
+      }
+     },
+     {
+      "tagType": "ATTR",
+      "operator": "AND",
+      "tagContainer": {
+       "tags": [
+        {
+         "key": "Env",
+         "value": "prod"
+        }
+       ],
+       "operator": "AND"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": 9101,
+   "name": "Lab Analyzers",
+   "description": "Lab analyzer VMs",
+   "expressionJson": {
+    "expressionContainers": [
+     {
+      "tagType": "ENI",
+      "operator": "AND",
+      "tagContainer": {
+       "tags": [
+        {
+         "key": "Role",
+         "value": "lab-analyzer"
+        }
+       ],
+       "operator": "AND"
+      }
+     }
+    ]
+   }
+  }
+ ],
+ "ztwWorkloadGroups": [
+  {
+   "id": 9100,
+   "name": "AWS Prod Web",
+   "description": "Production web tier in AWS",
+   "expressionJson": {
+    "expressionContainers": [
+     {
+      "tagType": "VPC",
+      "operator": "AND",
+      "tagContainer": {
+       "tags": [
+        {
+         "key": "Vpc-id",
+         "value": "vpc-0prod1"
+        }
+       ],
+       "operator": "AND"
+      }
+     },
+     {
+      "tagType": "ATTR",
+      "operator": "AND",
+      "tagContainer": {
+       "tags": [
+        {
+         "key": "Env",
+         "value": "prod"
+        }
+       ],
+       "operator": "AND"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": 9101,
+   "name": "Lab Analyzers",
+   "description": "Lab analyzer VMs",
+   "expressionJson": {
+    "expressionContainers": [
+     {
+      "tagType": "ENI",
+      "operator": "AND",
+      "tagContainer": {
+       "tags": [
+        {
+         "key": "Role",
+         "value": "lab-analyzer"
+        }
+       ],
+       "operator": "AND"
+      }
+     }
+    ]
+   }
+  }
+ ],
+ "ztwEcGroups": [
+  {
+   "id": 9200,
+   "name": "AWS us-east-1 Connectors",
+   "deployType": "AWS",
+   "platform": "AWS",
+   "status": [
+    "ENABLED"
+   ],
+   "location": {
+    "id": 3,
+    "name": "AWS us-east-1"
+   },
+   "ecVMs": [
+    {
+     "id": 1,
+     "name": "cc-use1-a",
+     "status": [
+      "ENABLED"
+     ],
+     "operationalStatus": "ACTIVE"
+    }
+   ]
+  },
+  {
+   "id": 9201,
+   "name": "Clinic 12 Branch",
+   "platform": "PHYSICAL",
+   "formFactor": "SMALL",
+   "status": [
+    "ENABLED"
+   ],
+   "location": {
+    "id": 4,
+    "name": "Clinic 12"
+   },
+   "ecVMs": [
+    {
+     "id": 2,
+     "name": "bc-clinic12",
+     "status": [
+      "ENABLED"
+     ],
+     "operationalStatus": "ACTIVE"
+    }
+   ]
+  }
+ ],
+ "ztwIpSourceGroups": [
+  {
+   "id": 9300,
+   "name": "Clinic 12 Medical Devices",
+   "ipAddresses": [
+    "10.12.40.0/24"
+   ]
+  }
+ ],
+ "ztwForwardingRules": [
+  {
+   "id": 9401,
+   "name": "Lab Analyzers to ZPA",
+   "type": "EC_RDR",
+   "order": 1,
+   "rank": 7,
+   "state": "ENABLED",
+   "forwardMethod": "ZPA",
+   "srcWorkloadGroups": [
+    {
+     "id": 9101,
+     "name": "Lab Analyzers"
+    }
+   ],
+   "zpaAppSegments": [
+    {
+     "name": "Lab Systems",
+     "externalId": "9004"
+    }
+   ],
+   "zpaGateway": {
+    "id": 1,
+    "name": "ZPA us-east-1"
+   }
+  },
+  {
+   "id": 9402,
+   "name": "Drop SMB from Prod",
+   "type": "EC_RDR",
+   "order": 2,
+   "rank": 7,
+   "state": "ENABLED",
+   "forwardMethod": "DROP",
+   "srcWorkloadGroups": [
+    {
+     "id": 9100,
+     "name": "AWS Prod Web"
+    }
+   ],
+   "nwServices": [
+    {
+     "id": 302,
+     "name": "SMB"
+    }
+   ]
+  },
+  {
+   "id": 9403,
+   "name": "Medical Devices Direct to Vendor",
+   "type": "EC_RDR",
+   "order": 3,
+   "rank": 7,
+   "state": "ENABLED",
+   "forwardMethod": "DIRECT",
+   "srcIpGroups": [
+    {
+     "id": 9300,
+     "name": "Clinic 12 Medical Devices"
+    }
+   ],
+   "destAddresses": [
+    "updates.vendor.example"
+   ]
+  },
+  {
+   "id": 9404,
+   "name": "Default Cloud Connector Forwarding",
+   "type": "EC_RDR",
+   "order": -1,
+   "defaultRule": true,
+   "state": "ENABLED",
+   "forwardMethod": "ZIA",
+   "proxyGateway": {
+    "id": 2,
+    "name": "Default ZIA Gateway"
+   }
   }
  ]
 }

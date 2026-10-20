@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.8.0 — 2026-10-20
+- Workload traffic: "Traffic from" switch (user device / workload); workload source IP, tags, workload group, connector group and type.
+- Cloud & Branch Connector product: forwarding rules (ecRules/ecRdr), workload groups, connector groups, gateways, ZTW IP groups and network services; ZIA workload groups.
+- Connector forwarding module (ZIA / ZPA / Direct / Local switch / Proxy chain / Drop) with its own result card; ZPA handoff only when the connector forwards to ZPA.
+- workloadGroups criterion evaluated in all ZIA rule modules; ZPA client type, connector group and identity/posture operands handled for workloads.
+- Sample workload policies and tests.
+
+## 1.7.0 — 2026-10-20
+- Client Connector devices per user with health; device-specific app profile evaluation and device warnings.
+- ZPA path health (App Connector status, certificate expiry) on ZPA results; health bar.
+- ZIA audit log ("Recent changes", "What changed recently?").
+- Local checks from this computer (ip.zscaler.com, DNS, TCP, TLS issuer).
+
 ## 1.6.4 — 2026-10-15
 - Result tile trimmed: action, rule, destination, Matched on (matching operand only), category only for ZIA; notes collapsed.
 - Posture caution box with each profile's requirement from postureConfig and the fail-case outcome.

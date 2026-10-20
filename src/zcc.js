@@ -194,7 +194,13 @@ function evaluateProfiles(data, ctx, pacCache = {}) {
   const rows = [];
   for (const p of profiles) {
     if (String(p.active) === '0' || p.active === false) continue;
-    const applies = profileAppliesTo(p, ctx);
+    let applies = profileAppliesTo(p, ctx);
+    // A looked-up device says exactly which app profile it runs: only that one applies.
+    if (ctx.device && ctx.device.profile) {
+      const plat = { 3: 'Windows', 4: 'macOS' }[ctx.device.osType];
+      const mine = String(p.name).toLowerCase() === String(ctx.device.profile).toLowerCase() && (!plat || !p._platform || p._platform === plat);
+      applies = { all: false, label: mine ? `this device (${ctx.device.hostname || ctx.device.os || 'device'})` : 'other devices', match: mine ? 'yes' : 'no' };
+    }
     const fwd = findFwdProfile(p, fwds);
     const actions = fwd ? arr(fwd.forwardingProfileActions) : [];
     const nets = actions.length ? actions.map((fa) => ({ net: NET[fa.networkType] || `network ${fa.networkType}`, fa })) : [{ net: 'All networks', fa: null }];

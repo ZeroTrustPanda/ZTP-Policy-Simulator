@@ -1,6 +1,6 @@
 # 🐼 ZeroTrustPanda ZS Policy Simulator
 
-**Downloads (v1.6.4):** [Windows x64](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.4/ZTP-Policy-Simulator-1.6.4-windows-x64.zip) · [macOS Apple Silicon](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.4/ZTP-Policy-Simulator-1.6.4-macos-arm64.zip) · [macOS Intel](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.4/ZTP-Policy-Simulator-1.6.4-macos-x64.zip) · [SHA256SUMS](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.4/SHA256SUMS.txt) — all builds in [`downloads/`](downloads/). Release notes: [RELEASE_NOTES.md](RELEASE_NOTES.md) · history: [CHANGELOG.md](CHANGELOG.md)
+**Downloads (v1.8.0):** [Windows x64](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.0/ZTP-Policy-Simulator-1.8.0-windows-x64.zip) · [macOS Apple Silicon](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.0/ZTP-Policy-Simulator-1.8.0-macos-arm64.zip) · [macOS Intel](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.0/ZTP-Policy-Simulator-1.8.0-macos-x64.zip) · [SHA256SUMS](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.0/SHA256SUMS.txt) — all builds in [`downloads/`](downloads/). Release notes: [RELEASE_NOTES.md](RELEASE_NOTES.md) · history: [CHANGELOG.md](CHANGELOG.md)
 
 Standalone tool that answers "would this be allowed, blocked or bypassed — and by what?" against your live Zscaler policy. Same look as the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustPanda/ZTP-Policy-Wizard).
 
@@ -19,6 +19,9 @@ Below the tiles:
 - **Every module** — firewall, DNS, SSL, ATP, URL filtering, file type, sandbox, DLP, ZPA, with all evaluated rules on click.
 
 Smart defaults: port from the URL scheme (hostnames assume HTTPS/443), network service/application inferred from protocol+port (UDP/443 → QUIC), request method GET (CONNECT when not decrypted), file type from the URL path, standard DNS resolver for DNS app rules. Every assumption is stated on the result and can be overridden.
+
+## Workloads (Cloud & Branch Connector)
+Switch **Traffic from** to *Workload* and enter the workload's source IP, tags (`VPC:Vpc-id=vpc-0abc, Env=prod`), workload group and connector group. The simulator works out workload-group membership from the tags, evaluates the connector's traffic forwarding rules (ZIA, ZPA, Direct, Local switch, Proxy chaining, Drop), then ZIA policy (including each rule's workload group condition) or ZPA access policy (Cloud/Branch Connector client type and connector groups). Tick **☁️ Cloud & Branch Connector** in Load policies; the API client needs Cloud & Branch Connector access in ZIdentity.
 
 ## Evaluation order
 The simulator follows the path a transaction takes:
@@ -103,6 +106,8 @@ In the change wizard, switch to **🔒 Private application (ZPA)**. It is presel
 - `src/zscaler.js` — OneAPI client and policy loader
 - `src/engine.js` — ordered rule evaluation and outcome model
 - `src/zcc.js` — Client Connector per-profile forwarding evaluation
+- `src/workload.js` — workload tags, workload group expressions and membership
+- `src/live.js` — devices, ZPA path health, local checks, ZIA audit log
 - `src/changes.js` — block/allow change plans, apply, undo, activation, in-memory ZIA for sample sessions
 - `src/recommend.js` — expected-vs-actual recommendations, category advice, rules per category
 - `src/bulk.js` — CSV parsing, CIDR/range expansion, batched category lookup, results CSV

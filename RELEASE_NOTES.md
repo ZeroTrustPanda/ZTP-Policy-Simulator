@@ -1,18 +1,18 @@
-# ZeroTrustPanda ZS Policy Simulator v1.6.4
+# ZeroTrustPanda ZS Policy Simulator v1.8.0
 
-**Would this be allowed, blocked or bypassed — and by what?** A standalone simulator that pulls your live Zscaler policy over OneAPI and evaluates a transaction across ZIA, ZPA and Client Connector the way the cloud would, in rule order, then shows the deciding rule and everything else that could change the outcome.
+**Would this be allowed, blocked or bypassed — and by what?** A standalone simulator that pulls your live Zscaler policy over OneAPI and evaluates a transaction across ZIA, ZPA, Client Connector and Cloud & Branch Connector the way the cloud would, in rule order, then shows the deciding rule and everything else that could change the outcome.
 
 Companion to the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustPanda/ZTP-Policy-Wizard) — same look, same OneAPI authentication.
 
 ## Downloads
 | Platform | File |
 |---|---|
-| Windows x64 | [ZTP-Policy-Simulator-1.6.4-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.4/ZTP-Policy-Simulator-1.6.4-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
-| macOS Apple Silicon | [ZTP-Policy-Simulator-1.6.4-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.4/ZTP-Policy-Simulator-1.6.4-macos-arm64.zip) |
-| macOS Intel | [ZTP-Policy-Simulator-1.6.4-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.4/ZTP-Policy-Simulator-1.6.4-macos-x64.zip) |
+| Windows x64 | [ZTP-Policy-Simulator-1.8.0-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.0/ZTP-Policy-Simulator-1.8.0-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
+| macOS Apple Silicon | [ZTP-Policy-Simulator-1.8.0-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.0/ZTP-Policy-Simulator-1.8.0-macos-arm64.zip) |
+| macOS Intel | [ZTP-Policy-Simulator-1.8.0-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.0/ZTP-Policy-Simulator-1.8.0-macos-x64.zip) |
 | Source | clone the repo, or GitHub's "Source code" download on the release |
 
-Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.6.4/SHA256SUMS.txt)
+Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.0/SHA256SUMS.txt)
 
 No install, no Node.js required. Run it and it opens `http://127.0.0.1:8787`.
 macOS builds are unsigned — before first run: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`.
@@ -107,8 +107,37 @@ Port from the URL scheme (hostnames assume HTTPS/443) · network service and app
 
 ## Known limits
 - Zscaler offers no "evaluate this transaction" API, so evaluation is re-implemented from rule data. Time windows, user agent, device trust, risk score and source-port bypasses are flagged as unknown rather than evaluated.
+- Cloud & Branch Connector support follows Zscaler's API reference and SDK; it was tested against sample policies, not yet a live connector tenant. When a workload group has several tag sets joined by different AND/OR operators, check one against the console.
 - No per-transaction log lookup: the console's transaction-log endpoints refuse API-client tokens. Use the console's Web / Firewall Insights logs for per-transaction proof.
 - ZCC field names follow the shapes verified by the Policy Wizard; report any app profile that shows "no forwarding profile linked".
+
+## Changes in 1.8.0
+- **Workload traffic (Cloud & Branch Connector).** A new **Traffic from** switch on Simulate: *User device (Client Connector)* or *Workload (Cloud / Branch Connector)*. For a workload, enter any of:
+  - the workload's **source IP**;
+  - its **tags** as `key=value`, comma-separated, optionally typed (`ATTR`, `VM`, `ENI`, `VPC`, `SUBNET`), e.g. `VPC:Vpc-id=vpc-0abc, Env=prod`;
+  - a **workload group** to simulate as;
+  - the **connector group** and **Cloud / Branch** connector type (Auto reads it from the connector group).
+- **New product in Load policies: ☁️ Cloud & Branch Connector.** Loads the connector traffic forwarding rules (`/ztw/api/v1/ecRules/ecRdr`), workload groups, connector groups, forwarding gateways and the connector's IP source/destination groups and network services. ZIA workload groups (`/zia/api/v1/workloadGroups`) load with ZIA. Connect shows a ZTW reachability badge.
+- **Workload group membership** is worked out from the tags against each group's tag expression, and shown on the result.
+- **Connector forwarding** is evaluated in rule order on source IP / IP group, source workload group, connector group, location, destination (address, IP group, IP category, URL category, country), network service and application, and ZPA segment:
+  - ZIA → ZIA policy applies (gateway shown);
+  - ZPA → the ZPA access policy decides; if the destination isn't a ZPA segment the connection fails;
+  - Direct, Local switch, Proxy chaining → bypasses Zscaler;
+  - Drop → blocked;
+  - no match → the default rule (ZIA).
+
+  A new *How it gets there — Cloud & Branch Connector forwarding* card lists every rule and why it matched or not.
+- **ZIA rules now evaluate their workload group condition** (firewall, DNS, URL filtering, SSL, Cloud App Control, file type, sandbox, DLP) instead of flagging it as not evaluated. User-device traffic never matches a workload-only rule, and user/group rules never match workload traffic.
+- **ZPA for workloads:** SCIM, SAML, posture and trusted-network conditions don't match; *Client type* is checked against Cloud Connector (`edge_connector`) or Branch Connector; Cloud/Branch Connector group conditions are matched by name; segment bypass and the Client Connector forwarding policy are skipped.
+- Location defaults to the connector group's location.
+- Sample policies include workloads: lab analyzers forwarded to ZPA, SMB dropped from production, clinic medical devices sent direct to a vendor, and an SSH block for production workloads.
+
+## Changes in 1.7.0
+- **Devices:** picking a user lists their Client Connector devices (newest first) with OS, ZCC version, app profile, last seen and ZIA/ZPA/ZDX health. Simulating with a device applies only that device's app profile and platform, and flags device problems (ZPA disabled, unhealthy tunnel, stale check-in). Device one-time passwords are never read out.
+- **ZPA path health:** for an allowed or blocked ZPA segment, the tile shows the App Connector groups behind it with connected/total counts, which connectors are down and since when, and Browser Access / enrollment certificates that are expiring or expired.
+- **Health bar** at the top of Simulate: disconnected App Connectors, expiring certificates, and ZIA changes waiting for activation.
+- **🕘 Recent changes (ZIA):** pulls the ZIA audit log for the last hours and lists who changed what; **What changed recently?** on a result filters it to the deciding rule.
+- **🩺 Test from this computer:** checks what this machine sees: ip.zscaler.com (is traffic going through Zscaler, and which node), DNS through the system resolver vs 8.8.8.8 (a 100.64.x.x answer means ZPA synthetic IP), a TCP connect and the TLS certificate issuer.
 
 ## Changes in 1.6.4
 - **Cleaner result tile.** It shows:

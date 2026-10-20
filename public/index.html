@@ -213,6 +213,18 @@ table.cmp tr.diff td:first-child { box-shadow: inset 3px 0 0 #f59e0b; }
 .posture ul { margin: 4px 0 6px 18px; padding: 0; } .posture li { margin: 2px 0; }
 .posture .pf { margin-top: 4px; } .posture .pn { margin-top: 4px; font-size: 12px; opacity: .75; }
 .lk-details summary { font-size: 12px; }
+.dev-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.dev { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; font-size: 12.5px; cursor: pointer; background: var(--bg-secondary); max-width: 360px; }
+.dev.on { border-color: var(--accent-blue); background: rgba(59,130,246,.12); }
+.dev .h { font-weight: 600; color: var(--text-primary); font-size: 13px; }
+.svc { display: inline-flex; gap: 4px; align-items: center; font-size: 11px; padding: 1px 6px; border-radius: 10px; margin-right: 4px; }
+.svc.ok { background: var(--accent-green-dim); color: #6ee7b7; } .svc.bad { background: var(--accent-red-dim); color: #fca5a5; } .svc.na { background: var(--bg-card-hover); color: var(--text-secondary); }
+.path { margin-top: 10px; font-size: 13px; }
+.path.down { padding: 10px 12px; border-radius: var(--radius); background: rgba(239, 68, 68, .10); border: 1px solid rgba(239, 68, 68, .45); }
+.path .ph { font-weight: 700; color: #fca5a5; margin-bottom: 4px; }
+.lc-row { display: grid; grid-template-columns: 170px 1fr; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.lc-row:first-child { border-top: none; }
+.healthbar { margin-bottom: 12px; }
 .dir-results { border: 1px solid var(--border); border-radius: var(--radius); max-height: 180px; overflow-y: auto; margin-top: 6px; background: var(--bg-secondary); }
 .dir-results div { padding: 6px 10px; font-size: 13px; cursor: pointer; } .dir-results div:hover { background: var(--bg-card-hover); }
 .plan-step { border-left: 3px solid var(--accent-blue); padding: 6px 10px; margin: 8px 0; background: var(--bg-secondary); border-radius: 0 var(--radius) var(--radius) 0; font-size: 13px; }
@@ -258,6 +270,7 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
         <button class="sidebar-link" id="btnSaveSnap" disabled>💾 Save policy snapshot</button>
         <button class="sidebar-link" id="btnOpenSnap">📂 Open saved snapshot…</button>
         <button class="sidebar-link" id="btnChanges" disabled>🧾 Policy changes</button>
+        <button class="sidebar-link" id="btnAudit" disabled>🕘 Recent changes (ZIA)</button>
         <button class="sidebar-link" id="btnDiag" disabled>🩺 Diagnostics</button>
         <button class="sidebar-link" id="btnDisconnect" disabled>⏏ Disconnect</button>
         <input type="file" id="snapFile" accept=".json" class="hidden">
@@ -294,6 +307,7 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
             <label class="chip on"><input type="checkbox" class="grp" value="zia" checked>🌐 Internet Access (ZIA)</label>
             <label class="chip on"><input type="checkbox" class="grp" value="zcc" checked>💻 Client Connector</label>
             <label class="chip on" id="zpaChip"><input type="checkbox" class="grp" value="zpa" checked>🔒 Private Access (ZPA)</label>
+            <label class="chip on" id="ztwChip" title="Traffic forwarding rules, workload groups and connector groups — for simulating workload traffic"><input type="checkbox" class="grp" value="ztw" checked>☁️ Cloud &amp; Branch Connector</label>
           </div>
           <div class="form-hint" id="zpaIdNote" style="margin-top:8px"></div>
           <div id="zpaIdRow" class="hidden" style="margin-top:10px;max-width:560px">
@@ -315,9 +329,21 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
           <div class="seg" id="modeSeg" role="tablist"><button class="on" data-mode="single" role="tab">🎯 Single transaction</button><button data-mode="bulk" role="tab">📋 Bulk test (CSV)</button></div>
           <label class="switch blue" id="zpaSwitch" style="margin-bottom:1.25rem" title="Evaluate ZPA application segments, client forwarding and access policy first"><input type="checkbox" id="useZpa"><span class="knob"></span><span>🔒 Include ZPA <span class="form-hint" id="zpaHint"></span></span></label>
         </div>
+        <div id="healthBar"></div>
         <div id="singlePanel">
         <div class="card">
           <div class="card-header"><h2>Simulate a transaction</h2><p>Every field is optional. Leave Destination blank to ask "is this port or service blocked for everyone?"</p></div>
+          <div class="section-title" style="margin-top:0">Traffic from</div>
+          <div class="seg" id="srcSeg" role="tablist" style="margin-bottom:12px"><button class="on" data-src="device" role="tab">💻 User device (Client Connector)</button><button data-src="workload" role="tab">☁️ Workload (Cloud / Branch Connector)</button></div>
+          <div id="wlPanel" class="hidden" style="margin-bottom:14px"><div class="grid">
+            <div><label class="form-label">Workload source IP</label><input type="text" id="wlSourceIp" placeholder="e.g. 10.20.1.15"></div>
+            <div class="span2"><label class="form-label">Workload tags</label><input type="text" id="wlTags" placeholder="e.g. VPC:Vpc-id=vpc-0abc, Env=prod, ENI:Name=web-01"></div>
+            <div><label class="form-label">Workload group</label><input type="text" id="wlGroups" list="wlGroupList" placeholder="pick one, or leave blank to match by tags"><datalist id="wlGroupList"></datalist></div>
+            <div><label class="form-label">Connector group</label><input type="text" id="wlEcGroup" list="ecGroupList" placeholder="optional"><datalist id="ecGroupList"></datalist></div>
+            <div><label class="form-label">Connector type</label><select id="wlKind"><option value="">Auto (from the connector group)</option><option value="cloud">Cloud Connector</option><option value="branch">Branch Connector</option></select></div>
+          </div>
+          <div class="form-hint" style="margin-top:6px">ℹ️ Tags are <span class="mono">key=value</span>, comma-separated; prefix a type (<span class="mono">ATTR</span>, <span class="mono">VM</span>, <span class="mono">ENI</span>, <span class="mono">VPC</span>, <span class="mono">SUBNET</span>) to be exact. They're matched against each workload group's tag expression. Workload traffic carries no user, so user, group and posture conditions don't match it.</div>
+          <div class="form-hint" id="wlNote" style="margin-top:6px"></div></div>
           <div class="grid">
             <div class="span2"><label class="form-label">Destination — URL, host, IP or CIDR (wildcards ok)</label><input type="text" id="target" placeholder="e.g. google.com, *.google.com, 10.0.2.0/24 — blank = any"></div>
             <div><label class="form-label">Protocol</label><select id="protocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select></div>
@@ -336,6 +362,7 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
             <div class="span2"><label class="form-label">User or group</label>
               <div class="who-box"><span id="cmpPills"></span><input type="text" id="cmpQ" placeholder="Type a name, email or group…" autocomplete="off"></div>
               <div class="dir-results hidden" id="cmpRes"></div>
+              <div id="devRow" class="hidden" style="margin-top:10px"></div>
               <div class="form-hint" style="margin-top:6px">ℹ️ Pick one to simulate as that user or group. Pick a second to compare the two side by side.</div>
             </div>
             <div><label class="form-label">Department</label><input type="text" id="department"></div>
@@ -365,8 +392,9 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
               <div><label class="form-label">VPN gateway bypass</label><textarea id="vpnGateways"></textarea></div>
             </div>
           </div>
-          <div class="btn-group"><button class="btn btn-primary" id="btnSim">Simulate</button><button class="btn btn-ghost" id="btnLookup" title="Zscaler URL category lookup for the destination (up to 100, separated by commas or spaces)">🏷 Look up category</button><span class="msg" id="simMsg"></span></div>
+          <div class="btn-group"><button class="btn btn-primary" id="btnSim">Simulate</button><button class="btn btn-ghost" id="btnLookup" title="Zscaler URL category lookup for the destination (up to 100, separated by commas or spaces)">🏷 Look up category</button><button class="btn btn-ghost" id="btnLocal" title="Run DNS, TCP, TLS and 'am I going through Zscaler?' checks from this computer">🩺 Test from this computer</button><span class="msg" id="simMsg"></span></div>
         </div>
+        <div id="localOut"></div>
         <div id="lookupOut"></div>
         <div id="simOut"></div>
         </div>
@@ -400,6 +428,19 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
           <div class="btn-group"><span class="msg" id="actStatus">Activation status: …</span><button class="btn btn-success btn-sm" id="btnActivate">Activate changes</button><span class="msg" id="actMsg"></span></div>
         </div>
         <div id="chgLog"></div>
+      </section>
+
+      <section id="auditSec" class="hidden">
+        <div class="card">
+          <div class="card-header" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px"><div><h2>Recent changes</h2><p>ZIA audit log: who changed what, and when. Filter by a rule, category, admin or destination.</p></div><button class="btn btn-ghost btn-sm" id="btnAuditClose">Close</button></div>
+          <div class="grid" style="grid-template-columns:180px 1fr auto;align-items:end">
+            <div><label class="form-label">Time range</label><select id="auditHours"><option value="1">Last hour</option><option value="6">Last 6 hours</option><option value="24" selected>Last 24 hours</option><option value="72">Last 3 days</option><option value="168">Last 7 days</option></select></div>
+            <div><label class="form-label">Filter</label><input type="text" id="auditQ" placeholder="e.g. a rule name, URL Filtering, admin@…, a domain"></div>
+            <div><button class="btn btn-primary" id="btnAuditRun">Show changes</button></div>
+          </div>
+          <div class="msg" id="auditMsg" style="margin-top:10px"></div>
+          <div id="auditOut" style="margin-top:10px"></div>
+        </div>
       </section>
 
       <section id="diagSec" class="hidden">
@@ -513,7 +554,7 @@ function go(n) {
   if (!canGo(n)) return;
   step = n;
   for (const k of [1, 2, 3]) $('step' + k).classList.toggle('hidden', k !== n);
-  $('diagSec').classList.add('hidden'); $('chgSec').classList.add('hidden');
+  $('diagSec').classList.add('hidden'); $('chgSec').classList.add('hidden'); $('auditSec').classList.add('hidden');
   if (n === 3 && mode === 'bulk') bulkHint();
   refreshSidebar(); window.scrollTo({ top: 0 });
 }
@@ -525,7 +566,7 @@ function refreshSidebar() {
     el.classList.toggle('completed', done && n !== step);
     el.querySelector('.step-num').textContent = done && n !== step ? '✓' : n;
   });
-  $('btnSaveSnap').disabled = !loaded; $('btnDiag').disabled = !sid || demo; $('btnDisconnect').disabled = !sid; $('btnChanges').disabled = !loaded;
+  $('btnSaveSnap').disabled = !loaded; $('btnDiag').disabled = !sid || demo; $('btnDisconnect').disabled = !sid; $('btnChanges').disabled = !loaded; $('btnAudit').disabled = !loaded;
 }
 document.querySelectorAll('.sidebar-item[data-step]').forEach((el) => el.onclick = () => go(+el.dataset.step));
 function setAuth(text, ok) { $('authText').textContent = text; $('authBadge').className = 'auth-badge ' + (ok ? 'connected' : 'disconnected'); }
@@ -548,8 +589,12 @@ function setLoaded(snap) {
     const total = Object.values(snap.counts || {}).reduce((a, b) => a + b, 0);
     $('loadedText').textContent = `${total} policy objects · ${new Date(snap.loadedAt).toLocaleTimeString()}`;
     $('locList').innerHTML = (snap.locations || []).map((l) => `<option value="${esc(l)}">`).join('');
+    $('wlGroupList').innerHTML = (snap.workloadGroups || []).map((l) => `<option value="${esc(l)}">`).join('');
+    $('ecGroupList').innerHTML = (snap.ecGroups || []).map((l) => `<option value="${esc(l)}">`).join('');
+    $('wlNote').textContent = snap.connector ? `${(snap.workloadGroups || []).length} workload group(s) and ${(snap.ecGroups || []).length} connector group(s) loaded.` : (snap.workloadGroups || []).length ? `${snap.workloadGroups.length} workload group(s) loaded. Cloud & Branch Connector forwarding rules aren't loaded, so forwarding to ZIA is assumed.` : 'Cloud & Branch Connector policy isn\'t loaded. Tick it in Load policies to evaluate connector forwarding rules.';
   }
   refreshSidebar();
+  if (snap) setTimeout(loadHealth, 0); else if ($('healthBar')) $('healthBar').innerHTML = '';
 }
 
 // ---------- chips ----------
@@ -595,7 +640,7 @@ $('btnConnect').onclick = async () => {
     zpaCust = j.zpa || { customerId: null, source: null }; tenantKey = $('vanity').value.trim().toLowerCase();
     let wantZpa = true; try { wantZpa = localStorage.getItem('ztp-sim.zpa') !== '0'; $('zpac').value = localStorage.getItem('ztp-sim.zpaid.' + tenantKey) || ''; } catch {}
     for (const g of document.querySelectorAll('.grp')) {
-      const n = { zia: 'ZIA', zcc: 'ZCC', zpa: 'ZPA' }[g.value], pr = j.probe && j.probe[n];
+      const n = { zia: 'ZIA', zcc: 'ZCC', zpa: 'ZPA', ztw: 'ZTW' }[g.value], pr = j.probe && j.probe[n];
       g.checked = g.value === 'zpa' ? wantZpa && !(pr && !pr.ok && !pr.needsId) : !(pr && !pr.ok);
       g.parentNode.classList.toggle('on', g.checked);
     }
@@ -672,14 +717,29 @@ $('btnToSim').onclick = () => go(3);
 function vis(id) { const el = $(id); const sec = el && el.closest('.opt'); return !sec || sec.classList.contains('on'); }
 function v(id) { return vis(id) ? $(id).value.trim() : ''; }
 function list(id, up) { return v(id).split(',').map((x) => (up ? x.trim().toUpperCase() : x.trim())).filter(Boolean); }
+let trafficSrc = 'device';
 function formBody() {
-  return { useZpa: zpaOn(),
+  const wl = trafficSrc === 'workload';
+  return { useZpa: zpaOn(), source: trafficSrc,
+    ...(wl ? { workloadTags: $('wlTags').value.trim(), workloadGroups: $('wlGroups').value.trim(), ecGroup: $('wlEcGroup').value.trim(), connectorKind: $('wlKind').value } : {}),
     target: v('target'), port: v('port'), protocol: $('protocol').value, networkService: v('networkService'),
     fileType: v('fileType'), operation: v('operation'), method: v('method'), categories: list('cats', true), application: v('application'),
-    picks: vis('cmpQ') ? cmpPicks : [], department: v('department'), location: v('location'), sourceIp: v('sourceIp'), destCountry: v('destCountry'),
+    picks: !wl && vis('cmpQ') ? cmpPicks : [], deviceUdid: !wl && vis('cmpQ') && cmpPicks.length === 1 && cmpPicks[0].kind === 'user' ? selDevice : null, department: wl ? '' : v('department'), location: v('location'), sourceIp: wl ? $('wlSourceIp').value.trim() : v('sourceIp'), destCountry: v('destCountry'),
     manual: vis('pacText') ? { pacText: $('pacText').value, destExclusions: $('destExclusions').value, destInclusions: $('destInclusions').value, ipExclusions: $('ipExclusions').value, ipInclusions: $('ipInclusions').value, vpnGateways: $('vpnGateways').value } : {},
   };
 }
+function setSrc(src) {
+  trafficSrc = src === 'workload' ? 'workload' : 'device';
+  document.querySelectorAll('#srcSeg button').forEach((b) => b.classList.toggle('on', b.dataset.src === trafficSrc));
+  $('wlPanel').classList.toggle('hidden', trafficSrc !== 'workload');
+  // User pickers, device and bypass testing are Client Connector concepts; workloads have none of them.
+  for (const id of ['secWho', 'secFwd']) { const ch = document.querySelector(`#secChips input[data-sec="${id}"]`); if (ch) ch.closest('.chip').classList.toggle('hidden', trafficSrc === 'workload'); }
+  $('secFwd').classList.toggle('hidden', trafficSrc === 'workload');
+  $('btnSim').textContent = trafficSrc === 'workload' ? 'Simulate' : cmpPicks.length === 2 ? 'Compare' : 'Simulate';
+  try { localStorage.setItem('ztp-sim.src', trafficSrc); } catch {}
+}
+document.querySelectorAll('#srcSeg button').forEach((b) => b.addEventListener('click', () => setSrc(b.dataset.src)));
+try { if (localStorage.getItem('ztp-sim.src') === 'workload') setTimeout(() => setSrc('workload'), 0); } catch {}
 document.querySelectorAll('#singlePanel input[type=text]').forEach((el) => el.addEventListener('keydown', (e) => { if (e.key === 'Enter' && el.id !== 'cmpQ') $('btnSim').click(); }));
 
 // ---------- step 3: results ----------
@@ -695,7 +755,7 @@ function ruleBox(r, tag) {
   return `<div class="rule-box"><div><span class="nm">${esc(r.name)}</span> ${r.order != null && r.order >= 0 ? `<span class="badge b-slate">order ${esc(r.order)}</span>` : ''} ${r.action ? badgeFor(r.action) : ''} ${tag ? `<span class="badge b-purple">${esc(tag)}</span>` : ''}</div>${crits(r.criteria)}${r.engines && r.engines.length ? `<div class="form-hint">DLP engines: ${esc(r.engines.join(', '))}</div>` : ''}</div>`;
 }
 const ACT = { BLOCK: ['⛔', 'BLOCK', 'b-red'], ALLOW: ['✅', 'ALLOW', 'b-green'], BYPASS: ['↪', 'BYPASS', 'b-slate'], ISOLATE: ['🧪', 'ISOLATE', 'b-cyan'], CAUTION: ['⚠️', 'CAUTION', 'b-amber'] };
-const KIND_ICON = { identity: '👥', location: '📍', other: '⏱', zcc: '💻', content: '📄', input: '✏️', zia: '🌐', zpa: '🔒' };
+const KIND_ICON = { workload: '☁️', identity: '👥', location: '📍', other: '⏱', zcc: '💻', content: '📄', input: '✏️', zia: '🌐', zpa: '🔒' };
 function actBadge(a) { const x = ACT[a] || ['•', a, 'b-slate']; return `<span class="badge ${x[2]}">${x[0]} ${esc(x[1])}</span>`; }
 // What the deciding rule matched on for this user/group, in a few words.
 function matchedOn(p, modules) {
@@ -705,7 +765,7 @@ function matchedOn(p, modules) {
   const out = [];
   for (const cr of r.criteria || []) {
     if (cr.status !== 'match') continue;
-    if (!(cr.kind === 'identity' || cr.field === 'user/group/department')) continue;
+    if (!(cr.kind === 'identity' || cr.field === 'user/group/department' || cr.field === 'workload group' || cr.field === 'connector group' || cr.field === 'source IP' || /CONNECTOR_GROUP|CLIENT_TYPE/.test(cr.field) && cr.kind === 'workload')) continue;
     for (let d of cr.matched || [String(cr.detail || '').replace(/ — .*$/, '')]) {
       d = d.replace(/ \(ZPA SCIM membership\)/, '');
       const attr = d.match(/^(?:SCIM|SAML) attribute .*?= (.+)$/);
@@ -725,6 +785,25 @@ function postureBox(modules) {
     <div class="pf">Must pass for this result. If it fails: ${fail}</div>
     <div class="pn">Posture is checked by Client Connector on the device, so the simulator can't verify it.</div></div>`;
 }
+function deviceWarnBox(s) {
+  const w = s.deviceWarnings || [];
+  if (!w.length) return '';
+  return `<div class="posture"><div class="ph">⚠️ This device</div><ul>${w.map((x) => `<li>${esc(x.text)}</li>`).join('')}</ul></div>`;
+}
+const ago = (t) => { if (!t) return 'unknown'; const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; };
+function pathBox(modules) {
+  const z = modules.find((x) => x.module === 'ZPA Access Policy');
+  const ph = z && z.pathHealth;
+  if (!ph || !['ALLOW', 'BLOCK'].includes(z.verdict) && !z.deviceConditional) return '';
+  const certs = (ph.certs || []).map((c) => `<li>${esc(c.kind)} certificate <b>${esc(c.name)}</b> ${c.days < 0 ? 'has expired' : `expires in ${c.days} day${c.days === 1 ? '' : 's'}`}</li>`).join('');
+  if (!ph.haveData) return `<div class="path form-hint">ZPA path: App Connector status not loaded (reload policies with ZPA ticked).</div>`;
+  const grp = (g) => `${esc(g.name)} <span class="svc ${g.up ? (g.up === g.total ? 'ok' : 'na') : 'bad'}">${g.up}/${g.total} connected</span>`;
+  if (ph.status === 'ok' || ph.status === 'degraded') {
+    return `<div class="path">🔌 ZPA path: ${ph.groups.filter((g) => g.enabled).map(grp).join(' · ')}${ph.status === 'degraded' ? `<div class="form-hint" style="margin-top:4px">Down: ${esc(ph.groups.flatMap((g) => g.connectors.filter((c) => c.up === false).map((c) => `${c.name}${c.lastDisconnect ? ' (since ' + ago(c.lastDisconnect) + ')' : ''}`)).join(', '))}</div>` : ''}${certs ? `<ul style="margin:6px 0 0 18px">${certs}</ul>` : ''}</div>`;
+  }
+  const why = { down: 'No App Connector is connected in the connector groups serving this segment. Users will fail to reach it even though policy allows.', 'no-connectors': 'The connector groups serving this segment have no App Connectors.', 'no-connector-group': "The segment's server groups have no App Connector group.", 'no-server-group': 'This segment has no server group, so ZPA has no path to it.', unknown: 'Path status unknown.' }[ph.status] || '';
+  return `<div class="path down"><div class="ph">⛔ ZPA path problem</div>${esc(why)}${ph.groups.length ? `<div style="margin-top:4px">${ph.groups.map(grp).join(' · ')}</div>` : ''}${certs ? `<ul style="margin:6px 0 0 18px">${certs}</ul>` : ''}</div>`;
+}
 function actionTile(s, c, modules) {
   const p = s.primary, [ico, word] = ACT[p.action] || ['•', p.action];
   const zpaDecided = p.module === 'ZPA Access Policy';
@@ -742,7 +821,12 @@ function actionTile(s, c, modules) {
     ${tags ? `<div class="tags">${tags}</div>` : ''}
     <div class="ctx">${meta}</div>
     ${on ? `<div class="matched">Matched on: <b>${esc(on)}</b></div>` : ''}
+    ${c.source === 'workload' ? `<div class="matched">Workload: <b>${esc([c.sourceIp, ...((c.workload && c.workload.groups) || []).filter((g) => g.status === 'match').map((g) => 'group ' + g.name)].filter(Boolean).join(' · ') || 'no IP, tags or group entered')}</b>${c.ecGroup ? ` · connector group ${esc(c.ecGroup.name)}` : ''}</div>${connLine(modules, p)}` : ''}
+    ${c.device ? `<div class="matched">Device: <b>${esc(c.device.hostname || c.device.udid)}</b> · ${esc([c.device.os, c.device.profile && 'profile ' + c.device.profile].filter(Boolean).join(' · '))}</div>` : ''}
+    ${deviceWarnBox(s)}
     ${postureBox(modules)}
+    ${pathBox(modules)}
+    ${p.rule && p.module !== 'ZPA Access Policy' ? `<div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="openAudit(${esc(JSON.stringify(p.rule))})">🕘 What changed recently?</button></div>` : ''}
     ${why}${details}</div>`;
 }
 function basedOnTile(s, c) {
@@ -751,7 +835,7 @@ function basedOnTile(s, c) {
   const noUser = !(c.user || (c.groups || []).length);
   const body = conds.length
     ? conds.slice(0, 3).map(row).join('') + (conds.length > 3 ? `<div class="more hidden">${conds.slice(3).map(row).join('')}</div><button class="more-btn" onclick="this.previousElementSibling.classList.toggle('hidden'); this.textContent = this.textContent.startsWith('Show') ? 'Show less' : 'Show ${conds.length - 3} more'">Show ${conds.length - 3} more</button>` : '')
-    : `<div class="empty">Nothing else changes this result${noUser ? ' — it applies to every user, location and app profile' : ''}.</div>`;
+    : `<div class="empty">Nothing else changes this result${c.source === 'workload' ? ' for this workload' : noUser ? ' — it applies to every user, location and app profile' : ''}.</div>`;
   return `<div class="tile"><div class="t-title">Policy action also based on</div>${body}</div>`;
 }
 function candidatesCard(s, modules) {
@@ -759,9 +843,20 @@ function candidatesCard(s, modules) {
   if (!d || !(d.candidates || []).length || s.primary.action === 'BYPASS' || (s.primary.action === 'BLOCK' && s.primary.module !== d.module)) return '';
   return `<div class="card"><div class="card-header"><h3>📄 Content inspection</h3><p style="font-size:13px">${esc(d.note || '')}</p></div>${d.candidates.map((r) => ruleBox(r)).join('')}</div>`;
 }
+function connLine(modules, p) {
+  const f = modules.find((m) => m.connector);
+  if (!f || p.module === 'Connector forwarding') return '';
+  return `<div class="matched">☁️ Connector: <b>${esc(f.forward ? f.forward.text : f.reason)}</b>${f.decidingRule ? ` by rule "${esc(f.decidingRule.name)}"` : ''}${f.forward && (f.forward.proxyGateway || f.forward.zpaGateway) ? ` via gateway ${esc(f.forward.proxyGateway || f.forward.zpaGateway)}` : ''}</div>`;
+}
+function connectorCard(fw, sslNote) {
+  const rows = (fw.rules || []).map((r) => `<tr style="${r.status === 'nomatch' ? 'opacity:.55' : ''}"><td><b>${esc(r.name)}</b><div class="form-hint">${r.order != null && r.order >= 0 ? "order " + esc(r.order) : "default rule"}</div></td><td>${badgeFor(r.forward ? r.forward.method || 'ZIA' : r.action)}<div class="form-hint">${esc(r.forward ? r.forward.text : '')}${r.forward && (r.forward.proxyGateway || r.forward.zpaGateway) ? ' · gateway ' + esc(r.forward.proxyGateway || r.forward.zpaGateway) : ''}</div></td><td><span class="st ${esc(r.status)}">${esc(r.status)}</span>${r === fw.decidingRule || (fw.decidingRule && r.id === fw.decidingRule.id) ? ' <span class="badge b-blue">decides</span>' : ''}<details><summary>criteria</summary>${crits(r.criteria)}</details></td></tr>`).join('');
+  return `<div class="card"><div class="card-header"><h3>How it gets there — Cloud &amp; Branch Connector forwarding</h3><p style="font-size:13px">${esc(fw.reason)}</p>${fw.note ? `<div class="form-hint">${esc(fw.note)}</div>` : ''}</div>
+    ${rows ? `<table><tr><th style="width:30%">Forwarding rule</th><th style="width:30%">Forward method</th><th>Result</th></tr>${rows}</table>` : ''}${sslNote}</div>`;
+}
 function forwardingCard(fw, s) {
   const ssl = (s.bypasses || []).filter((b) => b.kind === 'ssl');
   const sslNote = ssl.length ? `<div class="note" style="margin-top:12px">🔓 SSL inspection bypassed — ${esc(ssl[0].how)}. URL-path, file type, sandbox, DLP and ATP content checks can't see inside it.</div>` : '';
+  if (fw && fw.connector) return connectorCard(fw, sslNote);
   if (!fw || !(fw.profiles || []).length) return sslNote ? `<div class="card"><div class="card-header"><h3>Inspection</h3></div>${sslNote}</div>` : '';
   const oc = (o) => `<div class="outcome">${o.outcome === 'ZIA' ? '<span class="badge b-green">via Zscaler</span>' : o.outcome === 'NOT_CAPTURED' ? '<span class="badge b-amber">not captured</span>' : '<span class="badge b-slate">bypassed</span>'}<span>${esc(o.how)}</span>${o.nets && !['—', 'All networks'].includes(o.nets[0]) ? `<span class="form-hint" style="margin:0">${esc(o.nets.join(', '))}</span>` : ''}</div>`;
   const rows = fw.profiles.map((p) => `<tr style="${p.applies === 'no' ? 'opacity:.5' : ''}"><td><b>${esc(p.name)}</b><div class="form-hint">${esc([p.platform, p.forwardingProfile ? 'forwarding: ' + p.forwardingProfile : 'no forwarding profile linked'].filter(Boolean).join(' · '))}</div></td>
@@ -1416,10 +1511,102 @@ $('btnActivate').onclick = async () => {
   $('btnActivate').disabled = false;
 };
 
+// ---------- devices for the picked user ----------
+let selDevice = null, devFor = null, devList = [];
+function svcBadge(name, svc) {
+  if (!svc) return '';
+  if (svc.enabled === false) return `<span class="svc bad">${name} off</span>`;
+  if (svc.health && !/^active$/i.test(svc.health)) return `<span class="svc bad">${name} ${esc(svc.health)}</span>`;
+  if (svc.health) return `<span class="svc ok">${name} ✓</span>`;
+  return `<span class="svc na">${name} ?</span>`;
+}
+function renderDevices(sel) {
+  const row = $('devRow');
+  if (!devList.length) { row.innerHTML = `<div class="form-hint">💻 No Client Connector devices found for this user.</div>`; return; }
+  row.innerHTML = `<div class="form-label">Device <span class="form-hint">— the simulation uses this device's app profile and checks its services</span></div><div class="dev-list">`
+    + devList.map((d) => { const h = (sel && sel.udid === d.udid && sel.health) || d.health; return `<div class="dev ${selDevice === d.udid ? 'on' : ''}" data-udid="${esc(d.udid)}"><div class="h">💻 ${esc(d.hostname || d.udid)}</div><div class="form-hint">${esc([d.os, d.osVersion].filter(Boolean).join(' '))} · ZCC ${esc(d.zccVersion || '?')} · seen ${esc(ago(d.lastSeen))}</div><div class="form-hint">Profile: <b>${esc(d.profile || '?')}</b>${d.registration && !/^registered$/i.test(d.registration) ? ' · ' + esc(d.registration) : ''}</div>${h ? `<div style="margin-top:4px">${svcBadge('ZIA', h.zia)}${svcBadge('ZPA', h.zpa)}${svcBadge('ZDX', h.zdx)}${h.tunnelVersion ? `<span class="svc na">${esc(h.tunnelVersion)}</span>` : ''}</div>` : ''}</div>`; }).join('')
+    + `<div class="dev ${selDevice ? '' : 'on'}" data-udid=""><div class="h">Any device</div><div class="form-hint">Evaluate every app profile</div></div></div>`;
+}
+async function loadDevices() {
+  const p = cmpPicks.length === 1 && cmpPicks[0].kind === 'user' ? cmpPicks[0] : null;
+  const user = p && (p.email || (/@/.test(p.name) ? p.name : ''));
+  if (!user || !loaded) { $('devRow').classList.add('hidden'); selDevice = null; devFor = null; return; }
+  if (devFor === user) return;
+  devFor = user; selDevice = null; devList = [];
+  $('devRow').classList.remove('hidden'); $('devRow').innerHTML = '<div class="form-hint"><span class="spinner"></span> Looking up Client Connector devices…</div>';
+  try {
+    const j = await api('/api/devices', { user });
+    if (devFor !== user) return;
+    devList = j.devices || []; selDevice = j.selected ? j.selected.udid : null;
+    for (const d of devList) if (j.selected && d.udid === j.selected.udid) Object.assign(d, { health: j.selected.health });
+    renderDevices(j.selected);
+  } catch (e) { $('devRow').innerHTML = `<div class="form-hint">💻 ${esc(e.message)}</div>`; }
+}
+$('devRow').addEventListener('click', async (e) => {
+  const d = e.target.closest('.dev'); if (!d) return;
+  selDevice = d.dataset.udid || null; renderDevices();
+  const dv = devList.find((x) => x.udid === selDevice);
+  if (dv && !dv.health) { try { const j = await api('/api/device', { udid: selDevice }); if (j.device) { dv.health = j.device.health; renderDevices(); } } catch {} }
+});
+const _renderCmp = renderCmp;
+renderCmp = function () { _renderCmp(); loadDevices(); };
+
+// ---------- checks from this computer ----------
+$('btnLocal').onclick = async () => {
+  const target = $('target').value.trim();
+  $('btnLocal').disabled = true; $('localOut').innerHTML = '<div class="card"><span class="spinner"></span> Testing from this computer…</div>';
+  try {
+    const r = await api('/api/localcheck', { target, port: $('port').value.trim() });
+    const yes = (t) => `<span class="svc ok">${t}</span>`, no = (t) => `<span class="svc bad">${t}</span>`, na = (t) => `<span class="svc na">${t}</span>`;
+    const rows = [];
+    const z = r.zscaler || {};
+    rows.push(['Through Zscaler?', z.ok ? `${z.viaZscaler === true ? yes('Yes') : z.viaZscaler === false ? no('No') : na('Unclear')} ${esc(z.summary || '')}${(z.details || []).length > 1 ? `<div class="form-hint">${z.details.slice(1, 4).map(esc).join('<br>')}</div>` : ''}` : no('Check failed') + ' ' + esc(z.error || '')]);
+    if (r.dns) rows.push(['DNS', `System: <span class="mono">${esc((r.dns.system || []).join(', ') || r.dns.systemError || '—')}</span> · Public (8.8.8.8): <span class="mono">${esc((r.dns.public || []).join(', ') || r.dns.publicError || '—')}</span>${(r.dns.notes || []).map((n) => `<div class="form-hint">${esc(n)}</div>`).join('')}`]);
+    if (r.tcp) rows.push([`TCP ${r.port}`, r.tcp.ok ? `${yes('Open')} connected to <span class="mono">${esc(r.tcp.v || '')}</span> in ${r.tcp.ms} ms` : `${no('Failed')} ${esc(r.tcp.error)}`]);
+    if (r.tls) rows.push(['TLS certificate', r.tls.ok ? `${r.tls.inspected ? no('Inspected by Zscaler') : yes('Not inspected')} issued by <b>${esc(r.tls.issuer || '?')}</b> for ${esc(r.tls.subject || '?')}${r.tls.authorized ? '' : `<div class="form-hint">This computer doesn't trust the chain (${esc(r.tls.authError || 'untrusted')})${r.tls.inspected ? ': the Zscaler root CA is probably not installed here' : ''}.</div>`}` : `${no('Failed')} ${esc(r.tls.error)}`]);
+    $('localOut').innerHTML = `<div class="card"><div class="card-header" style="display:flex;justify-content:space-between;gap:12px"><div><h3>🩺 Tested from this computer</h3><p style="font-size:13px">${r.host ? esc(r.host) + (r.port ? ':' + r.port : '') : 'No destination entered: Zscaler check only'}. Results reflect this machine's network and Client Connector, not the simulated user's.</p></div><button class="btn btn-ghost btn-sm" onclick="this.closest('.card').remove()">Close</button></div>${rows.map(([k, v]) => `<div class="lc-row"><div><b>${esc(k)}</b></div><div>${v}</div></div>`).join('')}</div>`;
+  } catch (e) { $('localOut').innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
+  $('btnLocal').disabled = false;
+};
+
+// ---------- recent changes (ZIA audit log) ----------
+function openAudit(q) {
+  for (const k of [1, 2, 3]) $('step' + k).classList.add('hidden');
+  $('diagSec').classList.add('hidden'); $('chgSec').classList.add('hidden'); $('auditSec').classList.remove('hidden');
+  if (q != null) { $('auditQ').value = q; $('btnAuditRun').click(); }
+}
+$('btnAudit').onclick = () => openAudit();
+$('btnAuditClose').onclick = () => go(step);
+$('auditQ').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btnAuditRun').click(); });
+$('btnAuditRun').onclick = async () => {
+  $('btnAuditRun').disabled = true; $('auditMsg').innerHTML = '<span class="spinner"></span> Building the audit log report in ZIA (can take up to a minute)…'; $('auditOut').innerHTML = '';
+  try {
+    const j = await api('/api/audit', { hours: +$('auditHours').value, q: $('auditQ').value.trim() });
+    const pref = ['Time', 'Admin', 'Action', 'Category', 'Sub-Category', 'Resource', 'Result', 'Client IP', 'Interface'];
+    const cols = [...pref.filter((c) => j.columns.includes(c)), ...j.columns.filter((c) => !pref.includes(c) && !/data$/i.test(c))].slice(0, 9);
+    $('auditMsg').textContent = `${j.matches} of ${j.total} change${j.total === 1 ? '' : 's'} in the last ${j.hours} hour${j.hours === 1 ? '' : 's'}${j.sample ? ' (sample policies)' : ''}${j.matches > j.entries.length ? `, showing the first ${j.entries.length}` : ''}.`;
+    $('auditOut').innerHTML = j.entries.length ? `<div style="overflow-x:auto"><table><tr>${cols.map((c) => `<th>${esc(c)}</th>`).join('')}</tr>${j.entries.map((e) => `<tr>${cols.map((c) => `<td>${esc(e[c] || '')}</td>`).join('')}</tr>`).join('')}</table></div>` : '<div class="empty">No matching changes.</div>';
+  } catch (e) { $('auditMsg').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+  $('btnAuditRun').disabled = false;
+};
+
+// ---------- tenant health bar (after policies load) ----------
+async function loadHealth() {
+  if (!sid || !loaded) return;
+  try {
+    const h = await api('/api/health');
+    const items = [];
+    if (h.activation && !/^active$/i.test(h.activation)) items.push(`⏳ ZIA has <b>changes pending activation</b> (${esc(h.activation)}): saved changes are not enforced yet.`);
+    for (const c of (h.zpa && h.zpa.certs) || []) items.push(`📜 ZPA ${esc(c.kind)} certificate <b>${esc(c.name)}</b> ${c.days < 0 ? 'has expired' : `expires in ${c.days} day${c.days === 1 ? '' : 's'}`}.`);
+    for (const g of (h.zpa && h.zpa.downGroups) || []) items.push(`🔌 ZPA App Connector group <b>${esc(g.name)}</b>: none of its ${g.total} connector${g.total === 1 ? '' : 's'} connected.`);
+    $('healthBar').innerHTML = items.length ? `<div class="note healthbar">${items.join('<br>')}</div>` : '';
+  } catch { $('healthBar').innerHTML = ''; }
+}
+
 // ---------- diagnostics ----------
 $('btnDiag').onclick = async () => {
   for (const k of [1, 2, 3]) $('step' + k).classList.add('hidden');
-  $('chgSec').classList.add('hidden');
+  $('chgSec').classList.add('hidden'); $('auditSec').classList.add('hidden');
   $('diagSec').classList.remove('hidden');
   try {
     const d = await api('/api/diagnostics');

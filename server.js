@@ -9,6 +9,7 @@ const { ZClient, loadSnapshot, refreshKeys, ZIA, probe, catalog, lookupUser, url
 const changes = require('./src/changes');
 const bulk = require('./src/bulk');
 const recommend = require('./src/recommend');
+const live = require('./src/live');
 const { simulate, rationalize } = require('./src/engine');
 const M = require('./src/matchers');
 const VERSION = require('./package.json').version;
@@ -43,7 +44,9 @@ function counts(snap) {
   return c;
 }
 function snapInfo(s) {
-  return s.snap ? { loadedAt: s.snap.loadedAt, counts: counts(s.snap), errors: s.snap.errors, locations: (s.snap.data.locations || []).map((l) => l.name).filter(Boolean) } : null;
+  return s.snap ? { loadedAt: s.snap.loadedAt, counts: counts(s.snap), errors: s.snap.errors, locations: (s.snap.data.locations || []).map((l) => l.name).filter(Boolean),
+    workloadGroups: require('./src/workload').allGroups(s.snap.data).map((g) => g.name).filter(Boolean), ecGroups: (s.snap.data.ztwEcGroups || []).map((g) => g.name).filter(Boolean),
+    connector: !!(s.snap.data.ztwForwardingRules || s.snap.data.ztwEcGroups) } : null;
 }
 
 app.get('/api/version', (req, res) => res.json({ version: VERSION }));
@@ -141,7 +144,13 @@ async function buildContext(s, b) {
     location: b.location || null, locationGroups: b.locationGroups || [], sourceIp: b.sourceIp || null, destCountry: b.destCountry || null,
     resolvedIps: [], categories: [], notes: [],
     useZpa: b.useZpa !== false, cloudApp: b.cloudApp || null,
+    source: b.source === 'workload' ? 'workload' : b.source === 'device' ? 'device' : undefined,
   };
+  if (ctx.source === 'workload') Object.assign(ctx, {
+    workloadTags: String(b.workloadTags || '').slice(0, 4000), workloadGroups: (Array.isArray(b.workloadGroups) ? b.workloadGroups : String(b.workloadGroups || '').split(',')).map((x) => String(x).trim()).filter(Boolean).slice(0, 20),
+    ecGroupName: b.ecGroup ? String(b.ecGroup).trim() : null, connectorKind: ['cloud', 'branch'].includes(b.connectorKind) ? b.connectorKind : null,
+    user: null, groups: [], department: null,
+  });
   if (b.ip) {
     if (!t) ctx.target = M.parseTarget(b.ip);
     else if (!t.isIp) ctx.resolvedIps.push(b.ip);
@@ -260,9 +269,12 @@ app.post('/api/simulate', wrap(async (req, res) => {
     if (pk.kind === 'group') ctx.notes.unshift(`Simulated as a member of group "${pk.name}"${pk.source ? ` (${pk.source})` : ''} only, with no user-specific attributes.`);
     return ctx;
   };
-  const picks = Array.isArray(b.picks) ? b.picks.slice(0, 2) : [];
+  const picks = Array.isArray(b.picks) && b.source !== 'workload' ? b.picks.slice(0, 2) : [];
+  const dev = b.deviceUdid && s.devCache && s.devCache.get(String(b.deviceUdid));
   if (picks.length === 1) {
-    const out = simulate(s.snap, await asPick(picks[0]), b.manual || {});
+    const pctx = await asPick(picks[0]);
+    if (dev) pctx.device = dev;
+    const out = simulate(s.snap, pctx, b.manual || {});
     out.snapshot = { loadedAt: s.snap.loadedAt, errors: s.snap.errors, counts: counts(s.snap) };
     out.pick = picks[0];
     return res.json(out);
@@ -279,6 +291,81 @@ app.post('/api/simulate', wrap(async (req, res) => {
   const ctx = await buildContext(s, b);
   const out = simulate(s.snap, ctx, b.manual || {});
   out.snapshot = { loadedAt: s.snap.loadedAt, errors: s.snap.errors, counts: counts(s.snap) };
+  res.json(out);
+}));
+
+// ---------- live state: devices, path health, local checks, audit log ----------
+// A user's Client Connector devices (newest first), with full health for the most recent one. Cached for 5 minutes:
+// the ZCC API is rate limited per hour.
+app.post('/api/devices', wrap(async (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  const user = String((req.body && req.body.user) || '').trim().toLowerCase();
+  if (!user) return res.status(400).json({ error: 'Pick a user first.' });
+  s.devCache = s.devCache || new Map(); s.devLists = s.devLists || new Map();
+  if (s.demo || !s.client) {
+    const list = (((s.snap && s.snap.data.demoDevices) || {})[user] || []).map((d) => Object.assign({}, d, { lastSeen: Date.now() - (d.lastSeenAgo || 0) }));
+    for (const d of list) s.devCache.set(d.udid, d);
+    return res.json({ devices: list.map((d) => Object.assign({}, d, { health: undefined })), selected: list[0] || null, sample: true });
+  }
+  const hit = s.devLists.get(user);
+  if (hit && Date.now() - hit.at < 300000) return res.json(hit.out);
+  let devices;
+  try { devices = await live.listDevices(s.client, user); }
+  catch (e) { return res.status(e.status === 403 ? 403 : 502).json({ error: `Client Connector device lookup failed: ${e.message}` }); }
+  let selected = null;
+  if (devices[0]) {
+    try { selected = await live.deviceDetails(s.client, devices[0].udid); } catch { selected = devices[0]; }
+    if (selected) s.devCache.set(selected.udid, selected);
+  }
+  for (const d of devices) if (!s.devCache.has(d.udid)) s.devCache.set(d.udid, d);
+  const out = { devices, selected };
+  s.devLists.set(user, { at: Date.now(), out });
+  res.json(out);
+}));
+app.post('/api/device', wrap(async (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  const udid = String((req.body && req.body.udid) || '');
+  s.devCache = s.devCache || new Map();
+  const c = s.devCache.get(udid);
+  if (s.demo || !s.client || (c && c.health)) return c ? res.json({ device: c }) : res.status(404).json({ error: 'Unknown device' });
+  const d = await live.deviceDetails(s.client, udid);
+  if (d) s.devCache.set(udid, d);
+  res.json({ device: d });
+}));
+
+// Checks run from this computer (where the simulator runs): through Zscaler?, DNS, TCP, TLS issuer.
+app.post('/api/localcheck', wrap(async (req, res) => {
+  const b = req.body || {};
+  const t = M.parseTarget(b.target || '');
+  const host = t && !t.isWildcard && !/\//.test(t.host) ? t.host : null;
+  const port = b.port ? +b.port : t && t.port ? t.port : host ? 443 : null;
+  const { fetchText } = require('./src/zscaler');
+  res.json(await live.localChecks({ host, port, fetchText }));
+}));
+
+// ZIA audit log for the last N hours, filtered by text (rule name, category, admin, destination...).
+app.post('/api/audit', wrap(async (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  const hours = Math.max(1, Math.min(+((req.body && req.body.hours) || 24), 720));
+  const q = String((req.body && req.body.q) || '');
+  let rep;
+  if (s.demo || !s.client) rep = { columns: ['Time', 'Admin', 'Action', 'Category', 'Sub-Category', 'Resource', 'Result', 'Client IP'], entries: ((s.snap && s.snap.data.demoAudit) || []).map((e) => Object.assign({ Time: new Date(Date.now() - e.agoHours * 3600e3).toISOString().replace('T', ' ').slice(0, 19) }, e, { agoHours: undefined })), sample: true };
+  else {
+    s.auditCache = s.auditCache || new Map();
+    const hit = s.auditCache.get(hours);
+    if (hit && Date.now() - hit.at < 300000) rep = hit.rep;
+    else { rep = await live.auditLog(s.client, { hours }); s.auditCache.set(hours, { at: Date.now(), rep }); }
+  }
+  const rows = live.filterAudit(rep.entries, q);
+  res.json({ columns: rep.columns, total: rep.entries.length, matches: rows.length, entries: rows.slice(0, 300), sample: !!rep.sample, hours });
+}));
+
+// Tenant health at a glance: ZIA activation, ZPA certificates expiring soon, connector groups with nothing connected.
+app.post('/api/health', wrap(async (req, res) => {
+  const s = getSession(req, res); if (!s) return;
+  const out = { zpa: s.snap ? live.zpaTenantHealth(s.snap.data) : null, activation: null };
+  if (!s.demo && s.client) { try { out.activation = await live.activationStatus(s.client); } catch (e) { out.activationError = e.message; } }
+  else out.activation = 'ACTIVE';
   res.json(out);
 }));
 

@@ -142,7 +142,7 @@ class ZClient {
 }
 
 function hintFor(status, path) {
-  const prod = path.startsWith('/zcc') ? 'Client Connector' : path.startsWith('/zpa') ? 'ZPA' : path.startsWith('/zins') ? 'Z-Insights' : path.startsWith('/private') ? 'ZIA logs' : 'ZIA';
+  const prod = path.startsWith('/zcc') ? 'Client Connector' : path.startsWith('/zpa') ? 'ZPA' : path.startsWith('/ztw') ? 'Cloud & Branch Connector' : path.startsWith('/zins') ? 'Z-Insights' : path.startsWith('/private') ? 'ZIA logs' : 'ZIA';
   if (status === 401) return prod === 'Z-Insights' ? ' — rejected with both token types; in ZIdentity give this API client the Z-Insights (Analytics) API resource/role' : ` — token rejected; the API client may lack ${prod} scope in ZIdentity`;
   if (status === 403) return ` — API client lacks permission for this ${prod} resource (ZIdentity role/scope)`;
   if (status === 404) return ' — endpoint not available on this tenant/subscription';
@@ -150,6 +150,7 @@ function hintFor(status, path) {
 }
 
 const ZIA = '/zia/api/v1';
+const ZTW = '/ztw/api/v1';
 const ZINS_AUDIENCE = 'https://api.zscaler.com';
 
 // Endpoint catalog. group drives the UI checkboxes; required means the module needs it to evaluate.
@@ -174,12 +175,29 @@ const ENDPOINTS = [
   { key: 'ipDestinationGroups', group: 'zia', label: 'IP destination groups', path: `${ZIA}/ipDestinationGroups` },
   { key: 'ipSourceGroups', group: 'zia', label: 'IP source groups', path: `${ZIA}/ipSourceGroups` },
   { key: 'locations', group: 'zia', label: 'Locations', path: `${ZIA}/locations`, query: { pageSize: '1000' } },
+  { key: 'workloadGroups', group: 'zia', label: 'Workload groups', path: `${ZIA}/workloadGroups`, optional: true },
+  // Cloud & Branch Connector (ZTW): traffic forwarding rules and the objects they reference
+  { key: 'ztwForwardingRules', group: 'ztw', label: 'Connector traffic forwarding rules', path: `${ZTW}/ecRules/ecRdr` },
+  { key: 'ztwWorkloadGroups', group: 'ztw', label: 'Connector workload groups', path: `${ZTW}/workloadGroups` },
+  { key: 'ztwEcGroups', group: 'ztw', label: 'Cloud & Branch Connector groups', path: `${ZTW}/ecgroup`,
+    slim: (g) => ({ id: g.id, name: g.name, desc: g.desc, deployType: g.deployType, platform: g.platform, formFactor: g.formFactor, status: g.status, operationalStatus: g.operationalStatus,
+      location: g.location && { id: g.location.id, name: g.location.name }, provTemplate: g.provTemplate && { id: g.provTemplate.id, name: g.provTemplate.name },
+      ecVMs: arr(g.ecVMs).map((v) => ({ id: v.id, name: v.name, status: v.status, operationalStatus: v.operationalStatus, formFactor: v.formFactor, upgradeStatus: v.upgradeStatus, ziaGateway: v.ziaGateway && v.ziaGateway.name, zpaBroker: v.zpaBroker && v.zpaBroker.name })) }) },
+  { key: 'ztwGateways', group: 'ztw', label: 'Connector forwarding gateways', path: `${ZTW}/gateways` },
+  { key: 'ztwIpSourceGroups', group: 'ztw', label: 'Connector IP source groups', path: `${ZTW}/ipSourceGroups` },
+  { key: 'ztwIpDestinationGroups', group: 'ztw', label: 'Connector IP destination groups', path: `${ZTW}/ipDestinationGroups` },
+  { key: 'ztwNetworkServices', group: 'ztw', label: 'Connector network services', path: `${ZTW}/networkServices` },
+  { key: 'ztwNetworkServiceGroups', group: 'ztw', label: 'Connector network service groups', path: `${ZTW}/networkServiceGroups` },
   { key: 'zccPoliciesWin', group: 'zcc', label: 'ZCC app profiles (Windows)', path: '/zcc/papi/public/v1/web/policy/listByCompany', query: { deviceType: '3', pageSize: '500' } },
   { key: 'zccPoliciesMac', group: 'zcc', label: 'ZCC app profiles (macOS)', path: '/zcc/papi/public/v1/web/policy/listByCompany', query: { deviceType: '4', pageSize: '500' } },
   { key: 'zccForwardingProfiles', group: 'zcc', label: 'ZCC forwarding profiles', path: '/zcc/papi/public/v1/webForwardingProfile/listByCompany' },
   { key: 'zccAppServices', group: 'zcc', label: 'ZCC IP-based app bypass definitions', path: '/zcc/papi/public/v1/webAppService/listByCompany' },
 ];
 
+const slimConnector = (c) => ({ id: c.id, name: c.name, enabled: c.enabled, appConnectorGroupId: c.appConnectorGroupId, appConnectorGroupName: c.appConnectorGroupName,
+  controlChannelStatus: c.controlChannelStatus || c.ctrlChannelStatus, currentVersion: c.currentVersion, expectedVersion: c.expectedVersion, upgradeStatus: c.upgradeStatus,
+  lastBrokerConnectTime: c.lastBrokerConnectTime, lastBrokerDisconnectTime: c.lastBrokerDisconnectTime, publicIp: c.publicIp, privateIp: c.privateIp, location: c.location });
+const slimCert = (c) => ({ id: c.id, name: c.name || c.cName, cName: c.cName, issuedBy: c.issuedBy, issuedTo: c.issuedTo, validFromInEpochSec: c.validFromInEpochSec, validToInEpochSec: c.validToInEpochSec, status: c.status });
 const zpaBase = (id, v = 1) => `/zpa/mgmtconfig/v${v}/admin/customers/${id}`;
 function zpaEndpoints(customerId) {
   const base = zpaBase(customerId), v2 = zpaBase(customerId, 2);
@@ -194,6 +212,12 @@ function zpaEndpoints(customerId) {
     { key: 'zpaSamlAttributes', group: 'zpa', label: 'ZPA SAML attributes', path: `${v2}/samlAttribute`, query: { pagesize: '500' } },
     { key: 'zpaPostureProfiles', group: 'zpa', label: 'ZPA posture profiles', path: `${v2}/posture`, query: { pagesize: '500' } },
     { key: 'zpaTrustedNetworks', group: 'zpa', label: 'ZPA trusted networks', path: `${v2}/network`, query: { pagesize: '500' } },
+    // Path health: App Connectors and certificates (trimmed to what the health check needs; no PEMs or keys kept)
+    { key: 'zpaConnectorGroups', group: 'zpa', label: 'ZPA App Connector groups', path: `${base}/appConnectorGroup`, query: { pagesize: '500' },
+      slim: (g) => ({ id: g.id, name: g.name, enabled: g.enabled, location: g.location, connectors: arr(g.connectors).map(slimConnector) }) },
+    { key: 'zpaConnectors', group: 'zpa', label: 'ZPA App Connectors', path: `${base}/connector`, query: { pagesize: '500' }, slim: slimConnector },
+    { key: 'zpaBaCerts', group: 'zpa', label: 'ZPA Browser Access certificates', path: `${base}/certificate`, query: { pagesize: '500' }, slim: slimCert },
+    { key: 'zpaEnrollmentCerts', group: 'zpa', label: 'ZPA enrollment certificates', path: `${v2}/enrollmentCert`, query: { pagesize: '500' }, slim: slimCert },
   ];
 }
 
@@ -244,6 +268,7 @@ async function probe(client) {
   const checks = [
     ['ZIA', `${ZIA}/status`],
     ['ZCC', '/zcc/papi/public/v1/webForwardingProfile/listByCompany'],
+    ['ZTW', `${ZTW}/ecgroup/lite`],
   ];
   const out = {};
   for (const [name, path] of checks) {
@@ -427,6 +452,7 @@ async function fetchEndpoint(client, e) {
   if (e.group === 'zpa' && Array.isArray(data) && pages > 1) {
     for (let pg = 2; pg <= Math.min(pages, 50); pg++) data = data.concat(arr(unwrap(await client.get(e.path, Object.assign({}, e.query, { page: String(pg) })))));
   }
+  if (e.slim && Array.isArray(data)) data = data.map(e.slim);
   return { data };
 }
 const arr = (x) => (Array.isArray(x) ? x : x == null ? [] : [x]);
@@ -440,4 +466,4 @@ async function refreshKeys(client, snap, keys) {
   snap.loadedAt = Date.now();
 }
 
-module.exports = { zpaScimMembership, zidIndex, zidUserKeys, zpaScimAttrName, zpaScimGroupName, zpaWorks, zpaIdCandidates, jwtClaims, ZClient, loadSnapshot, refreshKeys, ZIA, zpaBase, CAC_TYPES, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, ENDPOINTS };
+module.exports = { fetchText, zpaScimMembership, zidIndex, zidUserKeys, zpaScimAttrName, zpaScimGroupName, zpaWorks, zpaIdCandidates, jwtClaims, ZClient, loadSnapshot, refreshKeys, ZIA, zpaBase, CAC_TYPES, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, ENDPOINTS };
