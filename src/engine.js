@@ -404,6 +404,18 @@ function evalRule(rule, crits) {
   };
 }
 
+// Multi-match: rules after the deciding one whose criteria also match this transaction. They never apply
+// (first match wins), but they show overlapping or shadowed policy. Catch-alls (default rules, or rules with no
+// restricting criteria) match everything, so they are counted rather than listed.
+const isCatchAll = (e) => !(e.criteria || []).some((c) => c.status !== 'any');
+function multiMatch(evaluated, deciding, verdictOf) {
+  if (!deciding) return { list: [], catchAll: 0 };
+  const after = evaluated.slice(evaluated.indexOf(deciding) + 1).filter((e) => e.status === 'match');
+  const listed = after.filter((e) => !e._default && !isCatchAll(e));
+  const dv = verdictOf ? verdictOf(deciding) : deciding.action;
+  return { list: listed.map((e) => ({ id: e.id, name: e.name, order: e.order, action: e.action, differs: (verdictOf ? verdictOf(e) : e.action) !== dv })), catchAll: after.length - listed.length };
+}
+
 function ruleAction(rule) {
   if (rule.action && typeof rule.action === 'object') return rule.action.type || JSON.stringify(rule.action);
   return rule.action || rule.baRuleAction || rule.filteringAction || rule.accessControl || null;
@@ -414,7 +426,7 @@ function ruleAction(rule) {
 // mode 'content': content-dependent (DLP): report all rules whose non-content criteria match.
 function runModule(module, rules, buildCrits, { blockRe, allowRe, defaultVerdict = 'ALLOW', defaultReason = 'no matching rule (default action)', skipNote } = {}) {
   const sorted = sortRules(rules).filter((r) => lc(r.state) !== 'disabled');
-  const evaluated = sorted.map((r) => evalRule(r, buildCrits(r)));
+  const evaluated = sorted.map((r) => Object.assign(evalRule(r, buildCrits(r)), isDefaultRule(r) ? { _default: true } : {}));
   const decidingIdx = evaluated.findIndex((e) => e.status === 'match');
   const preempt = evaluated.slice(0, decidingIdx < 0 ? evaluated.length : decidingIdx).filter((e) => e.status === 'unknown');
   const deciding = decidingIdx >= 0 ? evaluated[decidingIdx] : null;
@@ -425,7 +437,9 @@ function runModule(module, rules, buildCrits, { blockRe, allowRe, defaultVerdict
   const changers = preempt.filter((e) => verdictOf(e.action) !== verdict);
   if (changers.length) confidence = 'conditional';
   const sameOutcome = preempt.filter((e) => verdictOf(e.action) === verdict);
+  const mm = multiMatch(evaluated, deciding, (e) => verdictOf(e.action));
   return {
+    alsoMatched: mm.list, alsoMatchedCatchAll: mm.catchAll,
     module, verdict, confidence,
     decidingRule: deciding, couldOverride: changers, sameOutcomeEarlier: sameOutcome,
     reason: deciding ? `Rule "${deciding.name}" (order ${deciding.order}) matched` : defaultReason,
@@ -824,7 +838,11 @@ function mZpa(snap, ctx) {
   const idx = evaluated.findIndex((e) => e.status === 'match');
   out.rules = evaluated; out.considered = evaluated.length;
   out.couldOverride = evaluated.slice(0, idx < 0 ? evaluated.length : idx).filter((e) => e.status === 'unknown');
-  if (idx >= 0) { out.decidingRule = evaluated[idx]; out.verdict = /DENY/.test(evaluated[idx].action) ? 'BLOCK' : 'ALLOW'; out.reason = `Access rule "${evaluated[idx].name}" matched`; }
+  if (idx >= 0) {
+    out.decidingRule = evaluated[idx]; out.verdict = /DENY/.test(evaluated[idx].action) ? 'BLOCK' : 'ALLOW'; out.reason = `Access rule "${evaluated[idx].name}" matched`;
+    const mm = multiMatch(evaluated, evaluated[idx], (e) => (/DENY/.test(e.action || '') ? 'BLOCK' : 'ALLOW'));
+    out.alsoMatched = mm.list; out.alsoMatchedCatchAll = mm.catchAll;
+  }
   else {
     out.verdict = 'BLOCK'; out.reason = 'Matched an application segment but no access rule allows it (ZPA default deny)';
     const maybe = out.couldOverride.filter((e) => !/DENY/.test(e.action || ''));
@@ -1026,6 +1044,7 @@ function mConnectorForwarding(data, ctx) {
   const via = d && (f.proxyGateway || f.zpaGateway) ? ` via gateway "${f.proxyGateway || f.zpaGateway}"` : '';
   Object.assign(out, {
     verdict, decidingRule: d, rules: res.rules, considered: res.considered,
+    ...(() => { const mm = multiMatch(res.rules, d, (e) => e.forward && e.forward.verdict); return { alsoMatched: mm.list, alsoMatchedCatchAll: mm.catchAll }; })(),
     couldOverride: pre.filter((e) => e.forward.verdict !== verdict), sameOutcomeEarlier: pre.filter((e) => e.forward.verdict === verdict),
     reason: d ? `Connector forwarding rule "${d.name}" (order ${d.order}): ${f.text}${via}` : 'No connector forwarding rule matched, so the default forwards it to ZIA',
     forward: d ? d.forward : { method: 'ZIA', verdict, text: 'forwarded to ZIA (default)' },
@@ -1105,6 +1124,8 @@ function simulate(snap, ctx, manual = {}) {
   // Live state that doesn't change the policy verdict but decides whether it works in practice.
   if (zpa && (zpa.matchedSegments || []).length) zpa.pathHealth = require('./live').zpaPathHealth(data, zpa.matchedSegments[0].id);
   const summary = summarize(modules, c2);
+  summary.multiMatch = modules.filter((m) => m && m.decidingRule && (m.alsoMatched || []).length)
+    .map((m) => ({ module: m.module, rule: m.decidingRule.name, order: m.decidingRule.order, action: m.decidingRule.action, also: m.alsoMatched, catchAll: m.alsoMatchedCatchAll || 0, decides: !!summary.primary && m.decidingRule.name === summary.primary.rule && (m.module === summary.primary.module || !!m.connector) }));
   if (c2.device) summary.deviceWarnings = require('./live').deviceWarnings(c2.device);
   return { context: c2, modules, summary };
 }

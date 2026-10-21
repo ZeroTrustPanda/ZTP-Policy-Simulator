@@ -26,6 +26,8 @@ body { font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-
 .header-brand h1 { font-size: 15px; font-weight: 600; background: linear-gradient(135deg, var(--text-primary), var(--accent-cyan)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 .tag { font-size: 10px; padding: 2px 8px; border-radius: 4px; background: var(--accent-blue-dim); color: var(--accent-blue); font-weight: 600; letter-spacing: .5px; text-transform: uppercase; }
 .header-right { display: flex; align-items: center; gap: 10px; }
+.multim { margin-top: 10px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(245,158,11,.45); background: rgba(245,158,11,.08); font-size: 13px; }
+.multim .ph { font-weight: 700; margin-bottom: 4px; color: #fcd34d; } .multim ul { margin: 6px 0 0 18px; padding: 0; } .multim li { margin: 3px 0; }
 .upd-toast { position: fixed; right: 20px; bottom: 20px; z-index: 1000; width: 340px; max-width: calc(100vw - 32px); background: var(--bg-card, #1e293b); color: var(--text-primary); border: 1px solid var(--accent-amber, #f59e0b); border-radius: 12px; padding: 14px 16px; box-shadow: 0 10px 30px rgba(0,0,0,.45); }
 .upd-toast .ut-h { font-weight: 700; margin-bottom: 4px; } .upd-toast .ut-b { font-size: 13px; } .upd-toast .ut-a { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; } .upd-toast .ut-f { margin-top: 8px; font-size: 12px; } .upd-toast a.btn { text-decoration: none; }
 .auth-badge { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; }
@@ -814,6 +816,20 @@ function postureBox(modules) {
     <div class="pf">Must pass for this result. If it fails: ${fail}</div>
     <div class="pn">Posture is checked by Client Connector on the device, so the simulator can't verify it.</div></div>`;
 }
+// Rules that also match after the deciding one (first match wins, so they don't apply).
+function mmList(also) {
+  return `<ul>${also.map((e) => `<li><b>${esc(e.name)}</b>${e.order != null && e.order >= 0 ? ` <span class="badge b-slate">order ${esc(e.order)}</span>` : ''} ${badgeFor(e.action)}${e.differs ? ' <span class="badge b-amber">different action</span>' : ''}</li>`).join('')}</ul>`;
+}
+function multiMatchBox(s) {
+  const all = s.multiMatch || [];
+  const mine = all.find((x) => x.decides), others = all.filter((x) => !x.decides);
+  if (!mine && !others.length) return '';
+  const n = mine ? mine.also.length : 0;
+  return `<div class="multim"><div class="ph">🔀 Multiple rules match</div>
+    ${mine ? `<div>"${esc(mine.rule)}" decides because it's first. ${n} more rule${n === 1 ? '' : 's'} in ${esc(mine.module)} also match${n === 1 ? 'es' : ''} and would apply if "${esc(mine.rule)}" were removed or moved below ${n === 1 ? 'it' : 'them'}:</div>${mmList(mine.also)}` : ''}
+    ${mine && mine.catchAll ? `<div class="form-hint">Plus ${mine.catchAll} catch-all/default rule${mine.catchAll === 1 ? '' : 's'}.</div>` : ''}
+    ${others.length ? `<div class="form-hint" style="margin-top:4px">Overlapping rules in other modules: ${others.map((x) => `${esc(x.module)} (${x.also.length})`).join(', ')}. See Every module.</div>` : ''}</div>`;
+}
 function deviceWarnBox(s) {
   const w = s.deviceWarnings || [];
   if (!w.length) return '';
@@ -852,6 +868,7 @@ function actionTile(s, c, modules) {
     ${on ? `<div class="matched">Matched on: <b>${esc(on)}</b></div>` : ''}
     ${c.source === 'workload' ? `<div class="matched">Workload: <b>${esc([c.sourceIp, ...((c.workload && c.workload.groups) || []).filter((g) => g.status === 'match').map((g) => 'group ' + g.name)].filter(Boolean).join(' · ') || 'no IP, tags or group entered')}</b>${c.ecGroup ? ` · connector group ${esc(c.ecGroup.name)}` : ''}</div>${connLine(modules, p)}` : ''}
     ${c.device ? `<div class="matched">Device: <b>${esc(c.device.hostname || c.device.udid)}</b> · ${esc([c.device.os, c.device.profile && 'profile ' + c.device.profile].filter(Boolean).join(' · '))}</div>` : ''}
+    ${multiMatchBox(s)}
     ${deviceWarnBox(s)}
     ${postureBox(modules)}
     ${pathBox(modules)}
@@ -899,9 +916,9 @@ function modulesCard(modules, s) {
   const items = modules.filter((m) => !m.module.startsWith('Forwarding')).map((m) => {
     const isDec = m.module === dec && s.overall !== 'ALLOWED';
     const sub = m.decidingRule ? `rule "${m.decidingRule.name}"` : m.reason;
-    return `<div class="mod"><div class="hd" onclick="this.parentNode.classList.toggle('open')"><span class="name">${esc(m.module)}</span>${isDec ? '<span class="badge b-blue">decides</span>' : ''}<span class="sub">${esc(sub || '')}</span>${m.confidence && m.confidence !== 'definite' ? `<span class="badge b-purple">${esc(m.confidence)}</span>` : ''}${badgeFor(m.verdict)}</div>
+    return `<div class="mod"><div class="hd" onclick="this.parentNode.classList.toggle('open')"><span class="name">${esc(m.module)}</span>${isDec ? '<span class="badge b-blue">decides</span>' : ''}<span class="sub">${esc(sub || '')}</span>${m.confidence && m.confidence !== 'definite' ? `<span class="badge b-purple">${esc(m.confidence)}</span>` : ''}${(m.alsoMatched || []).length ? `<span class="badge b-amber" title="More rules match after the deciding one">🔀 +${m.alsoMatched.length} match</span>` : ''}${badgeFor(m.verdict)}</div>
       <div class="bd"><div class="msg">${esc(m.reason)}</div>${m.note ? `<div class="note" style="margin-top:6px">${esc(m.note)}</div>` : ''}${(m.matchedSegments || []).length ? `<div class="form-hint">Matched segment(s): ${m.matchedSegments.map((x) => esc(x.name)).join(', ')}</div>` : ''}${(m.stages || []).length ? `<div style="margin-top:6px">${m.stages.map((st, i) => `<div class="crit"><span class="f">${i + 1}. ${esc(st.step)}</span><span class="st ${esc(st.status)}">${esc(st.status)}</span><span>${esc(st.detail)}</span></div>`).join('')}</div>` : ''}
-      ${m.decidingRule ? ruleBox(m.decidingRule, 'deciding') : ''}${(m.couldOverride || []).map((r) => ruleBox(r, 'unresolved')).join('')}
+      ${m.decidingRule ? ruleBox(m.decidingRule, 'deciding') : ''}${(m.alsoMatched || []).length ? `<div class="multim" style="margin:8px 0"><div class="ph">🔀 Also match (first match wins, so these don't apply)</div>${mmList(m.alsoMatched)}${m.alsoMatchedCatchAll ? `<div class="form-hint">Plus ${m.alsoMatchedCatchAll} catch-all/default rule(s).</div>` : ''}</div>` : ''}${(m.couldOverride || []).map((r) => ruleBox(r, 'unresolved')).join('')}
       ${(m.rules || []).length ? `<details><summary>All ${m.rules.length} evaluated rule(s)</summary>${m.rules.map((r) => ruleBox(r, r.status)).join('')}</details>` : ''}</div></div>`;
   }).join('');
   return `<div class="card"><div class="card-header"><h3>Every module</h3><p style="font-size:13px">Click a module for its rules.</p></div>${items}</div>`;

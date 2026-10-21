@@ -1,4 +1,4 @@
-# ZeroTrustPanda ZS Policy Simulator v1.8.2
+# ZeroTrustPanda ZS Policy Simulator v1.8.3
 
 **Would this be allowed, blocked or bypassed — and by what?** A standalone simulator that pulls your live Zscaler policy over OneAPI and evaluates a transaction across ZIA, ZPA, Client Connector and Cloud & Branch Connector the way the cloud would, in rule order, then shows the deciding rule and everything else that could change the outcome.
 
@@ -7,12 +7,12 @@ Companion to the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustP
 ## Downloads
 | Platform | File |
 |---|---|
-| Windows x64 | [ZTP-Policy-Simulator-1.8.2-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.2/ZTP-Policy-Simulator-1.8.2-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
-| macOS Apple Silicon | [ZTP-Policy-Simulator-1.8.2-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.2/ZTP-Policy-Simulator-1.8.2-macos-arm64.zip) |
-| macOS Intel | [ZTP-Policy-Simulator-1.8.2-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.2/ZTP-Policy-Simulator-1.8.2-macos-x64.zip) |
+| Windows x64 | [ZTP-Policy-Simulator-1.8.3-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.3/ZTP-Policy-Simulator-1.8.3-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
+| macOS Apple Silicon | [ZTP-Policy-Simulator-1.8.3-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.3/ZTP-Policy-Simulator-1.8.3-macos-arm64.zip) |
+| macOS Intel | [ZTP-Policy-Simulator-1.8.3-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.3/ZTP-Policy-Simulator-1.8.3-macos-x64.zip) |
 | Source | clone the repo, or GitHub's "Source code" download on the release |
 
-Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.2/SHA256SUMS.txt)
+Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.3/SHA256SUMS.txt)
 
 No install, no Node.js required. Run it and it opens `http://127.0.0.1:8787`.
 macOS builds are unsigned — before first run: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`.
@@ -110,6 +110,16 @@ Port from the URL scheme (hostnames assume HTTPS/443) · network service and app
 - Cloud & Branch Connector support follows Zscaler's API reference and SDK; it was tested against sample policies, not yet a live connector tenant. When a workload group has several tag sets joined by different AND/OR operators, check one against the console.
 - No per-transaction log lookup: the console's transaction-log endpoints refuse API-client tokens. Use the console's Web / Firewall Insights logs for per-transaction proof.
 - ZCC field names follow the shapes verified by the Policy Wizard; report any app profile that shows "no forwarding profile linked".
+
+## Changes in 1.8.3
+- **Multi-match.** When a transaction matches more than one rule in a module, the result says so and lists them.
+  - The deciding rule still wins (first match in rule order).
+  - The result tile gets a **🔀 Multiple rules match** box listing every later rule that also matches, with its order and action. Rules whose action differs from the deciding rule are tagged **different action**, so shadowed or conflicting policy stands out.
+  - Overlaps in other modules are summarized in the same box, e.g. *Firewall (1)*. In **Every module**, each module shows a **🔀 +N match** badge and the list.
+  - Catch-all and default rules (no restricting criteria, e.g. *Allow Everything Else* on category ANY) match everything, so they are counted, not listed.
+  - Rules that only *might* match, because the inputs don't settle a condition such as a user group, stay under *Policy action also based on*.
+  - Covered: URL filtering, firewall, DNS, SSL inspection, Cloud App Control, sandbox, file type, ZPA access policy and Cloud & Branch Connector forwarding.
+  - Bulk CSV results gain an **Also matched (first match wins)** column for the deciding module.
 
 ## Changes in 1.8.2
 Fixes from the first run against a live tenant (ZTH, Branch Connector):

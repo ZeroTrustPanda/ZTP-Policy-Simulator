@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.8.3 — 2026-10-21
+- Multi-match: later rules that also match are listed per module (tile box, module badge, bulk CSV column); different actions flagged; catch-alls counted.
+
 ## 1.8.2 — 2026-10-20
 - Live-tenant fixes: predefined connector rule order (−2 before −1), ZPA Pool For Stray Traffic scoped to the ZPA IP pool, empty Zscaler-managed destination groups (ZPA Brokers) no longer match everything, ZPA Edge App Segment = all ZPA apps, app service groups flagged, NOT_SUBSCRIBED shown as not subscribed, audit-log 404 retry.
 

@@ -125,7 +125,7 @@ const COLUMNS = [
   ['expected', 'Expected'], ['meets', 'Meets expectation'], ['area', 'Recommended area'], ['recommendation', 'Recommendation'],
   ['result', 'Result'], ['action', 'Policy rule action'], ['module', 'Deciding module'], ['rule', 'Deciding rule'], ['order', 'Rule order'],
   ['firewall', 'Firewall'], ['firewallRule', 'Firewall rule'], ['urlFiltering', 'URL filtering'], ['urlRule', 'URL filtering rule'], ['forwarding', 'Client Connector forwarding'],
-  ['couldBlock', 'Could be blocked by'], ['conditions', 'Conditions that change the result'], ['notes', 'Notes'], ['error', 'Error'],
+  ['alsoMatched', 'Also matched (first match wins)'], ['couldBlock', 'Could be blocked by'], ['conditions', 'Conditions that change the result'], ['notes', 'Notes'], ['error', 'Error'],
 ];
 function csvCell(v) {
   const s = v == null ? '' : String(v);
@@ -155,6 +155,7 @@ function resultRow(i, row, out, cat, expected, data) {
     firewall: fw.verdict || '', firewallRule: fw.decidingRule ? fw.decidingRule.name : '', firewallOrder: fw.decidingRule && fw.decidingRule.order >= 0 ? fw.decidingRule.order : '',
     urlFiltering: url.verdict || '', urlRule: url.decidingRule ? url.decidingRule.name : '',
     forwarding: fwd.verdict || '',
+    alsoMatched: (() => { const mm = (s.multiMatch || []).find((x) => x.decides); return mm ? mm.also.map((e) => `${e.name}${e.order != null && e.order >= 0 ? ' (order ' + e.order + ')' : ''}${e.differs ? ' [' + e.action + ']' : ''}`).join('; ') : ''; })(),
     couldBlock: blk ? `${blk.condition} → rule "${blk.rule || blk.module}"` : '',
     conditions: (s.alsoBasedOn || []).length,
     notes: notes.slice(0, 3).join(' | '), error: '',
