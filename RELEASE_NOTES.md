@@ -113,10 +113,10 @@ Port from the URL scheme (hostnames assume HTTPS/443) · network service and app
 
 ## Changes in 1.8.4
 - **Admin rank.** The simulator now reads **Admin Ranking** from ZIA Advanced Settings (`GET /zia/api/v1/advancedSettings`, `enableAdminRankAccess`).
-  - **When it's on**, ZIA rules are evaluated by admin rank first (0 = highest, 7 = lowest), then by rule order within a rank. This matches how the ZIA policy table and Zscaler's Terraform provider sort rules.
+  - **When it's on**, ZIA rules are evaluated by admin rank first (0 = highest, 7 = lowest), then by rule order within a rank. Zscaler's help says: "the rule's admin rank in turn automatically determines the rule order, so that rules with a higher admin rank are always given precedence", and rules with the same rank can be moved before or after each other. Zscaler's Terraform provider sorts rules the same way.
   - **When it's off**, rank is ignored, because ZIA can still store 0 or 7 on rules.
-  - Applies to URL filtering, firewall, DNS, SSL inspection, Cloud App Control, sandbox, file type and DLP.
-- **🏅 Admin rank decided this.** When a rule with a lower order number but a lower rank also matches, or might match, the result tile lists it. Without ranking, that rule would decide instead.
+  - Applies to URL filtering, firewall, DNS, Cloud App Control, sandbox, file type and DLP, the rule-based policies Zscaler lists. SSL inspection rules carry a rank too, and the API enforces it, so they are sorted the same way. Bandwidth Control and Mobile App Control aren't simulated.
+- **🏅 Admin rank decided this.** When a rule with a lower order number but a lower rank also matches, or might match, the result tile lists it. Without ranking, that rule would decide instead. ZIA normally renumbers rules so their order already follows rank, so this box mostly appears when the order numbers the API returns don't.
 - **Rank badges:** rule boxes, the result tile and the multi-match list show each rule's rank while ranking is on. A note in *Lookup details* says ranking is on.
 - **Policy changes:** with ranking on, a new rule takes the rank of the rule it's placed above, or of the top rule for *Top*, so ZIA doesn't reject it with "Rule with rank 7 is not allowed at order N". The preview warns that the API client's admin role needs that rank.
 - **Older snapshots** have no advanced settings, so they evaluate with ranking off. Reload policies to pick it up.
