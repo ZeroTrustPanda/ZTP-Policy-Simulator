@@ -174,6 +174,8 @@ const ENDPOINTS = [
   { key: 'networkApplicationGroups', group: 'zia', label: 'Network application groups', path: `${ZIA}/networkApplicationGroups` },
   { key: 'ipDestinationGroups', group: 'zia', label: 'IP destination groups', path: `${ZIA}/ipDestinationGroups` },
   { key: 'ipSourceGroups', group: 'zia', label: 'IP source groups', path: `${ZIA}/ipSourceGroups` },
+  { key: 'advancedSettings', group: 'zia', label: 'Advanced settings (admin ranking)', path: `${ZIA}/advancedSettings`,
+    slim: null, pick: (d) => ({ enableAdminRankAccess: !!(d && d.enableAdminRankAccess) }) },
   { key: 'locations', group: 'zia', label: 'Locations', path: `${ZIA}/locations`, query: { pageSize: '1000' } },
   { key: 'workloadGroups', group: 'zia', label: 'Workload groups', path: `${ZIA}/workloadGroups`, optional: true },
   // Cloud & Branch Connector (ZTW): traffic forwarding rules and the objects they reference
@@ -461,6 +463,7 @@ async function fetchEndpoint(client, e) {
     for (let pg = 2; pg <= Math.min(pages, 50); pg++) data = data.concat(arr(unwrap(await client.get(e.path, Object.assign({}, e.query, { page: String(pg) })))));
   }
   if (e.slim && Array.isArray(data)) data = data.map(e.slim);
+  if (e.pick) data = e.pick(data);
   return { data };
 }
 const arr = (x) => (Array.isArray(x) ? x : x == null ? [] : [x]);

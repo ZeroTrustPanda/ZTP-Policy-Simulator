@@ -197,7 +197,13 @@ function plan(spec, data) {
     let order;
     try { order = placeOrder(rules, r.placeAbove); } catch (err) { errors.push(`${AREA_LABEL[a]}: ${err.message}`); continue; }
     const above = rules.find((x) => String(x.id) === String(r.placeAbove));
-    const base = { name, description: desc, order, state: 'ENABLED', rank: 7 };
+    // With Admin Ranking on, ZIA only accepts a rule at a position its rank allows ("Rule with rank 7 is not allowed at
+    // order N"), so the new rule takes the rank of the rule it is placed above.
+    const ranking = !!(data && data.advancedSettings && data.advancedSettings.enableAdminRankAccess);
+    const anchor = above || (r.placeAbove === 'TOP' ? rules.filter((x) => !x.defaultRule && +x.order > 0).sort((p1, p2) => p1.order - p2.order)[0] : null);
+    const rank = ranking && anchor && Number.isFinite(Number(anchor.rank)) ? Number(anchor.rank) : 7;
+    if (ranking && rank < 7) warnings.push(`${AREA_LABEL[a]}: admin ranking is on, so the new rule gets admin rank ${rank} (the rank of "${anchor.name}"). The API client's admin role needs rank ${rank} or higher to save it.`);
+    const base = { name, description: desc, order, state: 'ENABLED', rank };
     let body;
     if (a === 'url') body = Object.assign(base, { action: intent, urlCategories: [catRef], protocols: ['ANY_RULE'], requestMethods: URL_METHODS, blockOverride: false, enforceTimeValidity: false }, crit);
     else if (a === 'firewall') body = Object.assign(base, { action: intent === 'BLOCK' ? (r.blockAction === 'BLOCK_RESET' ? 'BLOCK_RESET' : 'BLOCK_DROP') : 'ALLOW', destIpGroups: groupRefs.map((id) => ({ id })), enableFullLogging: false }, crit);

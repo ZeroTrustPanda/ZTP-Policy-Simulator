@@ -782,8 +782,10 @@ function badgeFor(x) {
   return `<span class="badge ${cls}">${esc(k.replace(/_/g, ' '))}</span>`;
 }
 function crits(l) { return (l || []).map((c) => `<div class="crit"><span class="f">${esc(c.field)}</span><span class="st ${esc(c.status)}">${esc(c.status)}</span><span>${esc(c.detail)}</span></div>`).join(''); }
+let rankingOn = false; // set from the latest result: is ZIA Admin Ranking on?
+const rankBadge = (r) => (rankingOn && r ? ` <span class="badge b-slate" title="Admin rank: 0 is evaluated first, 7 last">rank ${esc(r.rank == null ? 7 : r.rank)}</span>` : '');
 function ruleBox(r, tag) {
-  return `<div class="rule-box"><div><span class="nm">${esc(r.name)}</span> ${r.order != null && r.order >= 0 ? `<span class="badge b-slate">order ${esc(r.order)}</span>` : ''} ${r.action ? badgeFor(r.action) : ''} ${tag ? `<span class="badge b-purple">${esc(tag)}</span>` : ''}</div>${crits(r.criteria)}${r.engines && r.engines.length ? `<div class="form-hint">DLP engines: ${esc(r.engines.join(', '))}</div>` : ''}</div>`;
+  return `<div class="rule-box"><div><span class="nm">${esc(r.name)}</span> ${r.order != null && r.order >= 0 ? `<span class="badge b-slate">order ${esc(r.order)}</span>` : ''}${rankBadge(r)} ${r.action ? badgeFor(r.action) : ''} ${tag ? `<span class="badge b-purple">${esc(tag)}</span>` : ''}</div>${crits(r.criteria)}${r.engines && r.engines.length ? `<div class="form-hint">DLP engines: ${esc(r.engines.join(', '))}</div>` : ''}</div>`;
 }
 const ACT = { BLOCK: ['⛔', 'BLOCK', 'b-red'], ALLOW: ['✅', 'ALLOW', 'b-green'], BYPASS: ['↪', 'BYPASS', 'b-slate'], ISOLATE: ['🧪', 'ISOLATE', 'b-cyan'], CAUTION: ['⚠️', 'CAUTION', 'b-amber'] };
 const KIND_ICON = { workload: '☁️', identity: '👥', location: '📍', other: '⏱', zcc: '💻', content: '📄', input: '✏️', zia: '🌐', zpa: '🔒' };
@@ -818,7 +820,17 @@ function postureBox(modules) {
 }
 // Rules that also match after the deciding one (first match wins, so they don't apply).
 function mmList(also) {
-  return `<ul>${also.map((e) => `<li><b>${esc(e.name)}</b>${e.order != null && e.order >= 0 ? ` <span class="badge b-slate">order ${esc(e.order)}</span>` : ''} ${badgeFor(e.action)}${e.differs ? ' <span class="badge b-amber">different action</span>' : ''}</li>`).join('')}</ul>`;
+  return `<ul>${also.map((e) => `<li><b>${esc(e.name)}</b>${e.order != null && e.order >= 0 ? ` <span class="badge b-slate">order ${esc(e.order)}</span>` : ''}${rankBadge(e)} ${badgeFor(e.action)}${e.differs ? ' <span class="badge b-amber">different action</span>' : ''}</li>`).join('')}</ul>`;
+}
+function rankBox(s) {
+  const r = s.rank;
+  if (!r || !r.on) return '';
+  const eff = r.effects || [];
+  if (!eff.length) return `<div class="matched">🏅 Admin ranking on · this rule is rank <b>${esc(r.rank)}</b></div>`;
+  const row = (e) => `<li><b>${esc(e.name)}</b> <span class="badge b-slate">order ${esc(e.order)}</span> <span class="badge b-slate">rank ${esc(e.rank == null ? 7 : e.rank)}</span> ${badgeFor(e.action)} ${e.status === 'match' ? '<span class="badge b-amber">also matches</span>' : '<span class="badge b-purple">might match</span>'}</li>`;
+  return `<div class="multim"><div class="ph">🏅 ${eff.some((e) => e.status === 'match') ? 'Admin rank decided this' : 'Admin rank may matter here'}</div>
+    <div>Admin ranking is on, so rules run by rank first (0 = highest), then order. This rule is rank ${esc(r.rank)}. These rules have a lower order number but a lower rank, so they come after it:</div><ul>${eff.map(row).join('')}</ul>
+    <div class="form-hint">Without admin ranking, the first of these that matches would decide instead.</div></div>`;
 }
 function multiMatchBox(s) {
   const all = s.multiMatch || [];
@@ -862,12 +874,13 @@ function actionTile(s, c, modules) {
   return `<div class="tile ${esc(p.action)}"><div class="t-title">Policy rule action</div>
     <div class="act"><span class="ico">${ico}</span>${esc(word)}</div>
     <div class="mod-name">${esc(p.module)}</div>
-    <div class="rule-name">${p.rule ? esc(p.rule) : `<span class="empty">${esc(p.reason || 'no rule matched — default action')}</span>`}${p.order != null && p.order >= 0 ? ` <span class="badge b-slate" style="vertical-align:3px">order ${esc(p.order)}</span>` : ''}</div>
+    <div class="rule-name">${p.rule ? esc(p.rule) : `<span class="empty">${esc(p.reason || 'no rule matched — default action')}</span>`}${p.order != null && p.order >= 0 ? ` <span class="badge b-slate" style="vertical-align:3px">order ${esc(p.order)}</span>` : ''}${s.rank && s.rank.on ? ` <span class="badge b-slate" style="vertical-align:3px">rank ${esc(s.rank.rank)}</span>` : ''}</div>
     ${tags ? `<div class="tags">${tags}</div>` : ''}
     <div class="ctx">${meta}</div>
     ${on ? `<div class="matched">Matched on: <b>${esc(on)}</b></div>` : ''}
     ${c.source === 'workload' ? `<div class="matched">Workload: <b>${esc([c.sourceIp, ...((c.workload && c.workload.groups) || []).filter((g) => g.status === 'match').map((g) => 'group ' + g.name)].filter(Boolean).join(' · ') || 'no IP, tags or group entered')}</b>${c.ecGroup ? ` · connector group ${esc(c.ecGroup.name)}` : ''}</div>${connLine(modules, p)}` : ''}
     ${c.device ? `<div class="matched">Device: <b>${esc(c.device.hostname || c.device.udid)}</b> · ${esc([c.device.os, c.device.profile && 'profile ' + c.device.profile].filter(Boolean).join(' · '))}</div>` : ''}
+    ${rankBox(s)}
     ${multiMatchBox(s)}
     ${deviceWarnBox(s)}
     ${postureBox(modules)}
@@ -1026,6 +1039,7 @@ $('btnSim').onclick = async () => {
     const j = await api('/api/simulate', body);
     lastSim = { body, result: j };
     const s = j.summary, c = j.context;
+    rankingOn = !!c.adminRanking;
     const errs = Object.keys((j.snapshot && j.snapshot.errors) || {});
     $('simOut').innerHTML = (errs.length ? `<div class="note" style="margin-bottom:10px">Not evaluated (failed to load): ${errs.map(esc).join(', ')}</div>` : '')
       + (j.pick ? `<div class="form-hint" style="margin-bottom:8px">Simulated as ${j.pick.kind === 'user' ? '👤' : '👥'} <b>${esc(pickLabel(j.pick))}</b>. Add a second user or group to compare.</div>` : '')

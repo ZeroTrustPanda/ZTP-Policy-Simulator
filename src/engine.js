@@ -367,19 +367,40 @@ function critUnmodelled(rule, skip = []) {
 }
 
 // ---------- rule evaluation ----------
-// ZIA evaluates rules by `order` (admin rank only constrains where a rule may be placed).
+// ZIA evaluates rules by `order`. With Admin Ranking enabled (Advanced Settings → enableAdminRankAccess), rules are
+// evaluated by admin rank first (0 = highest, 7 = lowest) and by order within a rank, as the ZIA policy table and the
+// Terraform provider sort them. With ranking disabled the rank is ignored (ZIA may still store 0 or 7).
 // Default/catch-all rules come back with order -1 (or a defaultRule flag) and are evaluated LAST.
 function isDefaultRule(r) {
   const o = Number(r.order);
   return r.defaultRule === true || r.default === true || (Number.isFinite(o) && o < 0) ||
     (r.predefined === true && /^default\b/i.test(String(r.name || '')));
 }
-function sortKey(r) {
-  const o = Number(r.order);
-  return [isDefaultRule(r) ? 1 : 0, Number.isFinite(o) && o >= 0 ? o : 1e9];
+const rankOf = (r) => { const n = Number(r && r.rank); return Number.isFinite(n) && n >= 0 && n <= 7 ? n : 7; };
+// Admin Ranking on? From ZIA Advanced Settings; an explicit simulator override wins.
+function rankOn(snap) {
+  if (snap && typeof snap._rankOverride === 'boolean') return snap._rankOverride;
+  return !!(snap && snap.advancedSettings && snap.advancedSettings.enableAdminRankAccess === true);
 }
-function sortRules(rules) {
-  return arr(rules).slice().sort((a, b) => { const x = sortKey(a), y = sortKey(b); return x[0] - y[0] || x[1] - y[1]; });
+function sortKey(r, ranked) {
+  const o = Number(r.order);
+  return [isDefaultRule(r) ? 1 : 0, ranked ? rankOf(r) : 0, Number.isFinite(o) && o >= 0 ? o : 1e9];
+}
+function sortRules(rules, ranked = false) {
+  return arr(rules).slice().sort((a, b) => { const x = sortKey(a, ranked), y = sortKey(b, ranked); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]; });
+}
+// Rules that admin rank moves ahead of the deciding rule although their order number is higher, or behind it although
+// lower: shown so the result explains why a rule with a later order number decided.
+function rankEffects(evaluated, deciding) {
+  if (!deciding) return [];
+  const di = evaluated.indexOf(deciding), out = [];
+  evaluated.forEach((e, i) => {
+    if (e === deciding || e._default) return;
+    const eo = Number(e.order), dord = Number(deciding.order);
+    if (!(eo >= 0 && dord >= 0)) return;
+    if (i > di && eo < dord && e.status !== 'nomatch') out.push({ name: e.name, order: e.order, rank: e.rank, action: e.action, status: e.status, side: 'after' });
+  });
+  return out;
 }
 
 // Request method. Explicit input wins; otherwise HTTP/decrypted HTTPS is assumed GET and
@@ -413,7 +434,7 @@ function multiMatch(evaluated, deciding, verdictOf) {
   const after = evaluated.slice(evaluated.indexOf(deciding) + 1).filter((e) => e.status === 'match');
   const listed = after.filter((e) => !e._default && !isCatchAll(e));
   const dv = verdictOf ? verdictOf(deciding) : deciding.action;
-  return { list: listed.map((e) => ({ id: e.id, name: e.name, order: e.order, action: e.action, differs: (verdictOf ? verdictOf(e) : e.action) !== dv })), catchAll: after.length - listed.length };
+  return { list: listed.map((e) => ({ id: e.id, name: e.name, order: e.order, rank: e.rank, action: e.action, differs: (verdictOf ? verdictOf(e) : e.action) !== dv })), catchAll: after.length - listed.length };
 }
 
 function ruleAction(rule) {
@@ -424,8 +445,8 @@ function ruleAction(rule) {
 // Generic ordered module evaluator.
 // mode 'first': first definite match decides; unknown rules ahead of it are "could override".
 // mode 'content': content-dependent (DLP): report all rules whose non-content criteria match.
-function runModule(module, rules, buildCrits, { blockRe, allowRe, defaultVerdict = 'ALLOW', defaultReason = 'no matching rule (default action)', skipNote } = {}) {
-  const sorted = sortRules(rules).filter((r) => lc(r.state) !== 'disabled');
+function runModule(module, rules, buildCrits, { blockRe, allowRe, defaultVerdict = 'ALLOW', defaultReason = 'no matching rule (default action)', skipNote, ranked = false } = {}) {
+  const sorted = sortRules(rules, ranked).filter((r) => lc(r.state) !== 'disabled');
   const evaluated = sorted.map((r) => Object.assign(evalRule(r, buildCrits(r)), isDefaultRule(r) ? { _default: true } : {}));
   const decidingIdx = evaluated.findIndex((e) => e.status === 'match');
   const preempt = evaluated.slice(0, decidingIdx < 0 ? evaluated.length : decidingIdx).filter((e) => e.status === 'unknown');
@@ -440,9 +461,10 @@ function runModule(module, rules, buildCrits, { blockRe, allowRe, defaultVerdict
   const mm = multiMatch(evaluated, deciding, (e) => verdictOf(e.action));
   return {
     alsoMatched: mm.list, alsoMatchedCatchAll: mm.catchAll,
+    rankOrdered: ranked, rankEffects: ranked ? rankEffects(evaluated, deciding) : [],
     module, verdict, confidence,
     decidingRule: deciding, couldOverride: changers, sameOutcomeEarlier: sameOutcome,
-    reason: deciding ? `Rule "${deciding.name}" (order ${deciding.order}) matched` : defaultReason,
+    reason: deciding ? `Rule "${deciding.name}" (order ${deciding.order}${ranked ? `, admin rank ${rankOf(deciding)}` : ''}) matched` : defaultReason,
     considered: evaluated.length, rules: evaluated, note: skipNote,
   };
 }
@@ -452,7 +474,7 @@ function mUrlFiltering(snap, ctx) {
   return runModule('URL Filtering', snap.urlFilteringRules, (r) => [
     critProtocol(r, ctx), critUrlCategories(r, ctx), critMethod(r, ctx), critIdentity(r, ctx), critLocation(r, ctx), critSourceIp(r, ctx, snap), critTimeWindows(r),
     W.critWorkload(r, ctx), ...critUnmodelled(r, ['cloudApplications']),
-  ].filter(Boolean), { blockRe: /^(BLOCK)$/, allowRe: /^(ALLOW|CAUTION|ISOLATE)$/ });
+  ].filter(Boolean), { ranked: rankOn(snap), blockRe: /^(BLOCK)$/, allowRe: /^(ALLOW|CAUTION|ISOLATE)$/ });
 }
 
 function mFirewall(snap, ctx) {
@@ -460,7 +482,7 @@ function mFirewall(snap, ctx) {
   const res = runModule('Firewall', snap.firewallRules, (r) => [
     critSourceIp(r, ctx, snap), critDest(r, ctx, snap), critServices(r, ctx, snap), critApps(r, ctx, snap), critIdentity(r, ctx), critLocation(r, ctx), critTimeWindows(r),
     W.critWorkload(r, ctx), ...critUnmodelled(r, ['sourceCountries', 'cloudApplications']),
-  ].filter(Boolean), { blockRe: /^BLOCK/, allowRe: /^(ALLOW|EVAL_NWAPP)$/, defaultReason: 'no matching rule (default firewall rule applies)' });
+  ].filter(Boolean), { ranked: rankOn(snap), blockRe: /^BLOCK/, allowRe: /^(ALLOW|EVAL_NWAPP)$/, defaultReason: 'no matching rule (default firewall rule applies)' });
   if (web) res.note = 'Ports 80/443 normally pass through the web proxy path (URL filtering etc.); firewall rules apply to all-port traffic from ZCC/GRE/IPsec depending on "Enable Firewall" and location settings.';
   return res;
 }
@@ -479,14 +501,14 @@ function mDns(snap, ctx) {
         return { field: 'dns application', status: ok ? 'match' : 'nomatch', detail: `assumed a standard DNS lookup through your resolver; rule apps ${apps.slice(0, 5).join(', ')} — set Application (e.g. GOOGLE_DNS, DOH) to test those` };
       })() : null,
     ].filter(Boolean);
-  }, { blockRe: /^BLOCK/, allowRe: /^(ALLOW|REDIR)/, defaultReason: 'no matching rule (DNS resolves normally)' });
+  }, { ranked: rankOn(snap), blockRe: /^BLOCK/, allowRe: /^(ALLOW|REDIR)/, defaultReason: 'no matching rule (DNS resolves normally)' });
 }
 
 function mSandbox(snap, ctx) {
   return runModule('Sandbox (Behavioral Analysis)', snap.sandboxRules, (r) => [
     critFileType(r, ctx), critUrlCategories(r, ctx), critProtocol(r, ctx), critIdentity(r, ctx), critLocation(r, ctx),
     W.critWorkload(r, ctx), ...critUnmodelled(r, ['cloudApplications']),
-  ].filter(Boolean), { blockRe: /BLOCK/, allowRe: /ALLOW/, defaultReason: 'no matching rule (file is not held for sandbox analysis by policy)' });
+  ].filter(Boolean), { ranked: rankOn(snap), blockRe: /BLOCK/, allowRe: /ALLOW/, defaultReason: 'no matching rule (file is not held for sandbox analysis by policy)' });
 }
 
 function mFileType(snap, ctx) {
@@ -496,7 +518,7 @@ function mFileType(snap, ctx) {
     nonAny(r.operation).length ? { field: 'operation', status: op ? (lc(r.operation) === lc(op) || lc(r.operation) === 'any' ? 'match' : 'nomatch') : 'unknown', detail: `rule ${r.operation}` } : null,
     critProtocol(r, ctx), critIdentity(r, ctx), critLocation(r, ctx), critTimeWindows(r),
     W.critWorkload(r, ctx), ...critUnmodelled(r, ['cloudApplications']),
-  ].filter(Boolean), { blockRe: /BLOCK/, allowRe: /ALLOW|CAUTION/, defaultReason: 'no matching rule (file type allowed)' });
+  ].filter(Boolean), { ranked: rankOn(snap), blockRe: /BLOCK/, allowRe: /ALLOW|CAUTION/, defaultReason: 'no matching rule (file type allowed)' });
 }
 
 // DLP is content dependent: rules matching on non-content criteria are *candidates*; verdict is conditional.
@@ -504,9 +526,9 @@ function mDlp(snap, ctx) {
   const res = runModule('Data Loss Prevention', snap.webDlpRules, (r) => [
     critFileType(r, ctx), critUrlCategories(r, ctx), critProtocol(r, ctx), critIdentity(r, ctx), critLocation(r, ctx), critTimeWindows(r),
     W.critWorkload(r, ctx), ...critUnmodelled(r, ['cloudApplications']),
-  ].filter(Boolean), { blockRe: /BLOCK/, allowRe: /ALLOW/, defaultReason: 'no DLP rule applies to this transaction' });
+  ].filter(Boolean), { ranked: rankOn(snap), blockRe: /BLOCK/, allowRe: /ALLOW/, defaultReason: 'no DLP rule applies to this transaction' });
   const candidates = res.rules.filter((r) => r.status !== 'nomatch');
-  const rules = sortRules(snap.webDlpRules);
+  const rules = sortRules(snap.webDlpRules, rankOn(snap));
   for (const c of candidates) {
     const src = rules.find((x) => x.id === c.id) || {};
     c.engines = names(src.dlpEngines);
@@ -528,7 +550,7 @@ function mSsl(snap, ctx) {
   const res = runModule('SSL Inspection', snap.sslRules, (r) => [
     critUrlCategories(r, ctx, 'urlCategories'), critDest(Object.assign({}, r, { destIpCategories: [], destCountries: [] }), ctx, snap), critIdentity(r, ctx), critLocation(r, ctx), critSourceIp(r, ctx, snap),
     W.critWorkload(r, ctx), ...critUnmodelled(r, ['cloudApplications', 'platforms']),
-  ].filter(Boolean), { blockRe: /BLOCK/, allowRe: /DECRYPT/, defaultReason: 'no matching rule (default SSL inspection action)' });
+  ].filter(Boolean), { ranked: rankOn(snap), blockRe: /BLOCK/, allowRe: /DECRYPT/, defaultReason: 'no matching rule (default SSL inspection action)' });
   if (res.decidingRule) {
     const a = res.decidingRule.action;
     res.verdict = /DO_NOT_DECRYPT/.test(a || '') ? 'NOT_DECRYPTED' : /DECRYPT/.test(a || '') ? 'DECRYPTED' : /BLOCK/.test(a || '') ? 'BLOCK' : a;
@@ -899,7 +921,7 @@ function mCloudApp(snap, ctx) {
     .map((r) => Object.assign({}, r, { action: cacAction(r), _acts: arr(r.actions) }));
   const out = runModule('Cloud App Control', rel, (r) => [critIdentity(r, ctx), critLocation(r, ctx), critTimeWindows(r), W.critWorkload(r, ctx),
     { field: 'cloud app', status: 'match', detail: `${app} (${r.ruleType || r.type || 'app'}${r._acts.length ? '; actions ' + r._acts.slice(0, 4).join(', ') : ''})` }],
-  { blockRe: /BLOCK/, allowRe: /ALLOW/, defaultReason: `no Cloud App Control rule for ${app}` });
+  { ranked: rankOn(snap), blockRe: /BLOCK/, allowRe: /ALLOW/, defaultReason: `no Cloud App Control rule for ${app}` });
   const partial = out.decidingRule && /ALLOW/.test(out.decidingRule.action) ? arr((rel.find((r) => r.id === out.decidingRule.id) || {})._acts).filter((a) => /DENY|BLOCK/i.test(a)) : [];
   if (partial.length) out.note = `Allowed, but restricts: ${partial.join(', ')}`;
   return out;
@@ -1079,6 +1101,8 @@ function simulate(snap, ctx, manual = {}) {
   const hasHost = !!(c2.target && !c2.target.isIp);
   const web = c2.isWeb && !!c2.target;
   const naNoDest = (module, why) => ({ module, verdict: 'N/A', confidence: 'definite', decidingRule: null, couldOverride: [], rules: [], considered: 0, reason: why });
+  c2.adminRanking = rankOn(data);
+  if (c2.adminRanking) c2.notes.push('Admin ranking is on for this tenant: ZIA rules are evaluated by admin rank first (0 = highest), then by rule order.');
   const workload = c2.source === 'workload';
   if (workload) {
     c2.workload = W.membership(data, c2);
@@ -1124,6 +1148,8 @@ function simulate(snap, ctx, manual = {}) {
   // Live state that doesn't change the policy verdict but decides whether it works in practice.
   if (zpa && (zpa.matchedSegments || []).length) zpa.pathHealth = require('./live').zpaPathHealth(data, zpa.matchedSegments[0].id);
   const summary = summarize(modules, c2);
+  { const dm = modules.find((m) => m && m.decidingRule && summary.primary && m.decidingRule.name === summary.primary.rule && m.module === summary.primary.module);
+    if (dm && dm.rankOrdered) summary.rank = { on: true, rank: rankOf(dm.decidingRule), effects: dm.rankEffects || [] }; }
   summary.multiMatch = modules.filter((m) => m && m.decidingRule && (m.alsoMatched || []).length)
     .map((m) => ({ module: m.module, rule: m.decidingRule.name, order: m.decidingRule.order, action: m.decidingRule.action, also: m.alsoMatched, catchAll: m.alsoMatchedCatchAll || 0, decides: !!summary.primary && m.decidingRule.name === summary.primary.rule && (m.module === summary.primary.module || !!m.connector) }));
   if (c2.device) summary.deviceWarnings = require('./live').deviceWarnings(c2.device);
@@ -1261,4 +1287,4 @@ function summarize(modules, ctx = {}) {
   return { overall, headline, primary, alsoBasedOn: conds, decider, allowedBy, bypasses, inspections, lines };
 }
 
-module.exports = { mConnectorForwarding, CONN_MODULE, simulate, rationalize, mCloudApp, cacAction, ATP_CATEGORY_MAP, WELL_KNOWN, fileTypeMatch, FILETYPE_ALIASES, mUrlFiltering, mFirewall, mDns, mSandbox, mFileType, mDlp, mSsl, mAtp, mZpa, mForwarding, sortRules };
+module.exports = { rankOn, rankOf, mConnectorForwarding, CONN_MODULE, simulate, rationalize, mCloudApp, cacAction, ATP_CATEGORY_MAP, WELL_KNOWN, fileTypeMatch, FILETYPE_ALIASES, mUrlFiltering, mFirewall, mDns, mSandbox, mFileType, mDlp, mSsl, mAtp, mZpa, mForwarding, sortRules };

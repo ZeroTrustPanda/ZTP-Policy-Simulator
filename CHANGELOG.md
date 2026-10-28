@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.8.4 — 2026-10-28
+- Admin rank: reads enableAdminRankAccess from ZIA advanced settings; when on, ZIA rules evaluate by rank then order; rank effects shown on the result; rank badges; new rules in policy changes take the anchor rule's rank.
+
 ## 1.8.3 — 2026-10-21
 - Multi-match: later rules that also match are listed per module (tile box, module badge, bulk CSV column); different actions flagged; catch-alls counted.
 

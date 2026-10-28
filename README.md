@@ -1,6 +1,6 @@
 # 🐼 ZeroTrustPanda ZS Policy Simulator
 
-**Downloads (v1.8.3):** [Windows x64](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.3/ZTP-Policy-Simulator-1.8.3-windows-x64.zip) · [macOS Apple Silicon](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.3/ZTP-Policy-Simulator-1.8.3-macos-arm64.zip) · [macOS Intel](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.3/ZTP-Policy-Simulator-1.8.3-macos-x64.zip) · [SHA256SUMS](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.3/SHA256SUMS.txt) — all builds in [`downloads/`](downloads/). Release notes: [RELEASE_NOTES.md](RELEASE_NOTES.md) · history: [CHANGELOG.md](CHANGELOG.md)
+**Downloads (v1.8.4):** [Windows x64](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.4/ZTP-Policy-Simulator-1.8.4-windows-x64.zip) · [macOS Apple Silicon](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.4/ZTP-Policy-Simulator-1.8.4-macos-arm64.zip) · [macOS Intel](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.4/ZTP-Policy-Simulator-1.8.4-macos-x64.zip) · [SHA256SUMS](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.4/SHA256SUMS.txt) — all builds in [`downloads/`](downloads/). Release notes: [RELEASE_NOTES.md](RELEASE_NOTES.md) · history: [CHANGELOG.md](CHANGELOG.md)
 
 Standalone tool that answers "would this be allowed, blocked or bypassed — and by what?" against your live Zscaler policy. Same look as the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustPanda/ZTP-Policy-Wizard).
 
@@ -24,6 +24,8 @@ Smart defaults: port from the URL scheme (hostnames assume HTTPS/443), network s
 Switch **Traffic from** to *Workload* and enter the workload's source IP, tags (`VPC:Vpc-id=vpc-0abc, Env=prod`), workload group and connector group. The simulator works out workload-group membership from the tags, evaluates the connector's traffic forwarding rules (ZIA, ZPA, Direct, Local switch, Proxy chaining, Drop), then ZIA policy (including each rule's workload group condition) or ZPA access policy (Cloud/Branch Connector client type and connector groups). Tick **☁️ Cloud & Branch Connector** in Load policies; the API client needs Cloud & Branch Connector access in ZIdentity.
 
 ## Evaluation order
+With **Admin Ranking** on (ZIA Advanced Settings), ZIA rules are evaluated by admin rank first (0 = highest), then by rule order; the result shows when rank changed which rule decided.
+
 The simulator follows the path a transaction takes:
 
 1. **ZPA first.** If the destination (and port) matches an application segment, it checks the segment's **Bypass** setting (Never / On-Net / Always), then the **Client Forwarding Policy** (Intercept / Intercept Accessible / Bypass). If ZPA carries the traffic, the **Access Policy** decides, and ZIA and the internet bypasses don't apply.
