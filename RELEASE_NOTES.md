@@ -1,4 +1,4 @@
-# ZeroTrustPanda ZS Policy Simulator v1.8.4
+# ZeroTrustPanda ZS Policy Simulator v1.8.5
 
 **Would this be allowed, blocked or bypassed — and by what?** A standalone simulator that pulls your live Zscaler policy over OneAPI and evaluates a transaction across ZIA, ZPA, Client Connector and Cloud & Branch Connector the way the cloud would, in rule order, then shows the deciding rule and everything else that could change the outcome.
 
@@ -7,12 +7,12 @@ Companion to the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustP
 ## Downloads
 | Platform | File |
 |---|---|
-| Windows x64 | [ZTP-Policy-Simulator-1.8.4-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.4/ZTP-Policy-Simulator-1.8.4-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
-| macOS Apple Silicon | [ZTP-Policy-Simulator-1.8.4-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.4/ZTP-Policy-Simulator-1.8.4-macos-arm64.zip) |
-| macOS Intel | [ZTP-Policy-Simulator-1.8.4-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.4/ZTP-Policy-Simulator-1.8.4-macos-x64.zip) |
+| Windows x64 | [ZTP-Policy-Simulator-1.8.5-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.5/ZTP-Policy-Simulator-1.8.5-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
+| macOS Apple Silicon | [ZTP-Policy-Simulator-1.8.5-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.5/ZTP-Policy-Simulator-1.8.5-macos-arm64.zip) |
+| macOS Intel | [ZTP-Policy-Simulator-1.8.5-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.5/ZTP-Policy-Simulator-1.8.5-macos-x64.zip) |
 | Source | clone the repo, or GitHub's "Source code" download on the release |
 
-Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.4/SHA256SUMS.txt)
+Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.5/SHA256SUMS.txt)
 
 No install, no Node.js required. Run it and it opens `http://127.0.0.1:8787`.
 macOS builds are unsigned — before first run: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`.
@@ -110,6 +110,37 @@ Port from the URL scheme (hostnames assume HTTPS/443) · network service and app
 - Cloud & Branch Connector support follows Zscaler's API reference and SDK; it was tested against sample policies, not yet a live connector tenant. When a workload group has several tag sets joined by different AND/OR operators, check one against the console.
 - No per-transaction log lookup: the console's transaction-log endpoints refuse API-client tokens. Use the console's Web / Firewall Insights logs for per-transaction proof.
 - ZCC field names follow the shapes verified by the Policy Wizard; report any app profile that shows "no forwarding profile linked".
+
+## Changes in 1.8.5
+Customer-reported fixes:
+- **"Office 365 One Click Rule" matched every destination.** The predefined rule's only condition is the Zscaler-managed app service group `OFFICE365`, and the API returns the group's name but not its members. The simulator didn't read that condition, so for example a Namecheap IP "hit" the Microsoft 365 rule. App service groups are now evaluated:
+  - **Hostnames** are checked against the service's published domains: Microsoft 365, Zoom, Webex, RingCentral, GoTo/LogMeIn, Talkdesk and Zscaler cloud endpoints.
+  - **IPs** are checked against Microsoft's published Microsoft 365 ranges (fetched from `endpoints.office.com` when policies load) and the tenant's Client Connector IP-based app definitions (M365, Microsoft Teams, ZOOMMEETING, …).
+  - **When neither can settle an IP**, the condition shows as unknown. It never matches everything.
+- **The same class of bug is closed everywhere.** Any rule condition the simulator doesn't evaluate now marks the rule *unknown* ("not evaluated by the simulator") instead of being skipped. A rule can no longer match all traffic because its only conditions were ones the simulator didn't read. Fixed with it:
+  - SSL **UCaaS One Click** (cloud apps ZOOM, WEBEX, …) and other rules with **cloud applications** are matched against the cloud app from Zscaler's URL lookup.
+  - DNS **ZPA Resolver for Locations** (`REDIR_ZPA`) now applies only to ZPA application names.
+  - DNS **resolved-IP categories** and file-type **categories** are now evaluated.
+- **No caching between simulations.**
+  - Every *Simulate* re-queries the destination's category, the user and ZPA SCIM membership.
+  - *Look up category* is always fresh.
+  - Every bulk run starts with empty lookups.
+  - API responses are sent `no-store`, and the page requests them with `cache: 'no-store'`.
+  - The previous result is cleared the moment a new simulation starts, so an old answer can never sit under a new question.
+- **Timeouts are called out.**
+  - If a policy set failed to load (e.g. ZIA timed out), its module shows **Not evaluated** instead of quietly falling through to "no rule matched → default action", and the result says *"⚠️ Couldn't fully run: Zscaler timed out"* with what wasn't checked.
+  - The same happens when the category or user lookup times out during a simulation.
+  - If the simulation itself can't run, it says so and shows no result.
+  - Bulk CSV gains a **Not evaluated (failed/timeout)** column.
+- **Save policy snapshot** now downloads the snapshot file in the browser and confirms with a pop-up message. A copy is still written to `~/ZTP-Policy-Simulator/snapshots`. Before, it saved silently to that folder, and its message was hidden in bulk mode, so it looked like nothing happened.
+- **Open saved snapshot** and the bulk **choose a file** button use a file input that browsers can always open. Success and errors now show as pop-up messages, where before an error was only shown on the Connect page.
+- **Button check:** every button was exercised in an automated browser run, with no script errors:
+  - Connect with sample policies; Simulate, run twice to confirm fresh results;
+  - Look up category; Test from this computer;
+  - Save snapshot (downloads), Open snapshot (file dialog, loads, simulates);
+  - Policy changes; Recent changes;
+  - Bulk template, paste, run and choose file;
+  - Disconnect.
 
 ## Changes in 1.8.4
 - **Admin rank.** The simulator now reads **Admin Ranking** from ZIA Advanced Settings (`GET /zia/api/v1/advancedSettings`, `enableAdminRankAccess`).

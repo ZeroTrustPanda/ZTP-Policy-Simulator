@@ -312,6 +312,23 @@ async function loadSnapshot(client, { groups = ['zia', 'zcc', 'zpa'], job } = {}
   // Merge per-platform ZCC app profiles into one list for the engine.
   const zp = [...(snap.data.zccPoliciesWin || []).map((p) => Object.assign({ _platform: 'Windows' }, p)), ...(snap.data.zccPoliciesMac || []).map((p) => Object.assign({ _platform: 'macOS' }, p))];
   if (snap.data.zccPoliciesWin || snap.data.zccPoliciesMac) snap.data.zccPolicies = zp;
+  // Microsoft 365 published endpoints: the members of the Zscaler-managed OFFICE365 app service group that the
+  // "Office 365 One Click" rules use (the API returns the group name only). Optional; without it, M365 IPs not in the
+  // tenant's Client Connector M365 definitions show as "can't check".
+  if (groups.includes('zia') && [...(snap.data.firewallRules || []), ...(snap.data.dnsRules || [])].some((r) => (r.appServiceGroups || []).some((g) => /OFFICE365/i.test((g && g.name) || g)))) {
+    if (job) job.items.m365 = { label: 'Microsoft 365 endpoints (for the Office 365 One Click rules)', group: 'zia', state: 'loading' };
+    try {
+      const txt = await fetchText(`https://endpoints.office.com/endpoints/worldwide?clientrequestid=${require('crypto').randomUUID()}`);
+      const list = JSON.parse(txt);
+      const ips = [...new Set(list.flatMap((e) => e.ips || []).filter((x) => !x.includes(':')))];
+      const urls = [...new Set(list.flatMap((e) => e.urls || []).map((u) => String(u).replace(/^\*\./, '')))];
+      snap.data.m365Endpoints = { ips, urls, fetchedAt: Date.now() };
+      if (job) Object.assign(job.items.m365, { state: 'ok', count: ips.length + urls.length });
+    } catch (e) {
+      snap.errors.m365Endpoints = e.message;
+      if (job) Object.assign(job.items.m365, { state: 'error', error: `${e.message} — Microsoft 365 IPs are checked against the tenant's Client Connector M365 definitions only` });
+    }
+  }
   // Fetch PAC files referenced by app profiles (pac_url) so they can be evaluated locally.
   const pacUrls = new Map();
   const addPac = (u, owner) => { if (u && /^https?:\/\//i.test(u)) pacUrls.set(u, (pacUrls.get(u) || []).concat(owner)); };

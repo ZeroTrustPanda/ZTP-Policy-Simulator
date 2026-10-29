@@ -28,6 +28,10 @@ body { font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-
 .header-right { display: flex; align-items: center; gap: 10px; }
 .multim { margin-top: 10px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(245,158,11,.45); background: rgba(245,158,11,.08); font-size: 13px; }
 .multim .ph { font-weight: 700; margin-bottom: 4px; color: #fcd34d; } .multim ul { margin: 6px 0 0 18px; padding: 0; } .multim li { margin: 3px 0; }
+.toast { position: fixed; left: 20px; bottom: 20px; z-index: 1001; max-width: min(520px, calc(100vw - 40px)); padding: 12px 16px; border-radius: 10px; font-size: 13px; box-shadow: 0 10px 30px rgba(0,0,0,.45); background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--accent-green, #10b981); }
+.toast.err { border-color: var(--accent-red, #ef4444); } .toast b { display: block; margin-bottom: 2px; }
+.incomplete { margin-bottom: 12px; padding: 12px 14px; border-radius: 10px; border: 1px solid rgba(239,68,68,.55); background: rgba(239,68,68,.1); font-size: 13px; }
+.incomplete .ph { font-weight: 700; color: #fca5a5; margin-bottom: 4px; } .incomplete ul { margin: 4px 0 0 18px; padding: 0; }
 .upd-toast { position: fixed; right: 20px; bottom: 20px; z-index: 1000; width: 340px; max-width: calc(100vw - 32px); background: var(--bg-card, #1e293b); color: var(--text-primary); border: 1px solid var(--accent-amber, #f59e0b); border-radius: 12px; padding: 14px 16px; box-shadow: 0 10px 30px rgba(0,0,0,.45); }
 .upd-toast .ut-h { font-weight: 700; margin-bottom: 4px; } .upd-toast .ut-b { font-size: 13px; } .upd-toast .ut-a { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; } .upd-toast .ut-f { margin-top: 8px; font-size: 12px; } .upd-toast a.btn { text-decoration: none; }
 .auth-badge { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; }
@@ -278,7 +282,7 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
         <button class="sidebar-link" id="btnAudit" disabled>🕘 Recent changes (ZIA)</button>
         <button class="sidebar-link" id="btnDiag" disabled>🩺 Diagnostics</button>
         <button class="sidebar-link" id="btnDisconnect" disabled>⏏ Disconnect</button>
-        <input type="file" id="snapFile" accept=".json" class="hidden">
+        <input type="file" id="snapFile" accept=".json,application/json" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none" tabindex="-1" aria-hidden="true">
       </div>
       <div class="sidebar-section">
         <div class="sidebar-section-title">About</div>
@@ -407,7 +411,7 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
           <div class="card">
             <div class="card-header"><h2>Bulk test</h2><p>Upload a list of IPs, CIDRs, ranges or hosts. Each one gets its Zscaler category and is run through the loaded policy, then you download the results as a CSV.</p></div>
             <div class="drop" id="bulkDrop">
-              <input type="file" id="bulkFile" accept=".csv,.txt,.tsv,text/csv,text/plain" class="hidden">
+              <input type="file" id="bulkFile" accept=".csv,.txt,.tsv,text/csv,text/plain" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none" tabindex="-1" aria-hidden="true">
               <div class="drop-main">📄 Drop a CSV here or <button class="linkbtn" id="bulkPick">choose a file</button></div>
               <div class="form-hint">One destination per line, or a header row with an <span class="mono">ip</span> column. Optional columns: <span class="mono">port, protocol, sourceIp, location, destCountry, category, user, label, expected</span> (block / allow per row). CIDRs and ranges expand to one row per address (up to a /16 per row, 250,000 rows in all). <button class="linkbtn" id="bulkTemplate">Download a template</button></div>
               <div class="fname hidden" id="bulkFileName"></div>
@@ -545,7 +549,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 let sid = null, demo = false, loaded = false, step = 1, lastSim = null;
 async function api(path, body) {
-  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ sessionId: sid }, body || {})) });
+  const r = await fetch(path, { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ sessionId: sid }, body || {})) });
   let j = {}; try { j = await r.json(); } catch {}
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
@@ -577,6 +581,22 @@ function showUpdate(force) {
 }
 $('updBadge').onclick = () => showUpdate(true);
 fetch('/api/update-check').then((r) => r.json()).then((j) => { upd = j; showUpdate(false); }).catch(() => {});
+let toastTimer = null;
+function toast(title, text, ok = true) {
+  let t = $('toast'); if (!t) { t = document.createElement('div'); t.id = 'toast'; t.setAttribute('role', 'status'); document.body.appendChild(t); }
+  t.className = 'toast' + (ok ? '' : ' err'); t.innerHTML = `<b>${esc(title)}</b>${esc(text || '')}`; t.style.display = '';
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.style.display = 'none'; }, ok ? 7000 : 12000);
+}
+// Lookups or policy sets that failed (timeouts included): the result is incomplete and says so up front.
+function incompleteBox(s) {
+  const inc = (s && s.incomplete) || [];
+  if (!inc.length) return '';
+  const anyTimeout = inc.some((x) => x.timeout);
+  return `<div class="incomplete"><div class="ph">⚠️ ${anyTimeout ? 'Couldn\'t fully run: Zscaler timed out' : 'Couldn\'t fully run'}</div>
+    <div>This result is incomplete. Parts of it were not checked:</div>
+    <ul>${inc.map((x) => `<li><b>${esc(x.module)}</b>${x.timeout ? ' — <b>ZIA timed out</b>' : ''}: ${esc(String(x.error).slice(0, 180))}${x.effect ? `<div class="form-hint">${esc(x.effect)}</div>` : ''}</li>`).join('')}</ul>
+    <div class="form-hint" style="margin-top:4px">Try again in a minute${inc.some((x) => !/lookup/i.test(x.module)) ? ', or reload policies' : ''}.</div></div>`;
+}
 function msg(id, m, ok) { $(id).innerHTML = ok ? esc(m) : `<span class="err">${esc(m)}</span>`; }
 
 // ---------- steps ----------
@@ -690,16 +710,29 @@ $('btnDisconnect').onclick = async () => {
   try { await api('/api/disconnect'); } catch {}
   sid = null; demo = false; setAuth('Not connected', false); setLoaded(null); $('simOut').innerHTML = ''; $('bulkOut').innerHTML = ''; $('pendingBadge').classList.add('hidden'); go(1);
 };
-$('btnOpenSnap').onclick = () => $('snapFile').click();
+$('btnOpenSnap').onclick = () => { $('snapFile').value = ''; $('snapFile').click(); };
 $('snapFile').onchange = async () => {
   const f = $('snapFile').files[0]; if (!f) return;
-  try { const j = await api('/api/snapshot/open', { snapshot: JSON.parse(await f.text()) }); sid = j.sessionId; demo = true; setAuth('Offline snapshot · ' + (j.tenant || f.name), true); setLoaded(j.snapshot); go(3); }
-  catch (e) { go(1); msg('connMsg', e.message); }
+  let parsed;
+  try { parsed = JSON.parse(await f.text()); } catch { toast('Couldn\'t open snapshot', `${f.name} isn't a JSON file.`, false); $('snapFile').value = ''; return; }
+  try {
+    const j = await api('/api/snapshot/open', { snapshot: parsed });
+    sid = j.sessionId; demo = true; setAuth('Offline snapshot · ' + (j.tenant || f.name), true); setLoaded(j.snapshot); $('simOut').innerHTML = ''; go(3);
+    toast('Snapshot opened', `${f.name}${j.tenant ? ' · ' + j.tenant : ''} — simulating offline against the saved policy.`);
+  } catch (e) { toast('Couldn\'t open snapshot', e.message, false); }
   $('snapFile').value = '';
 };
 $('btnSaveSnap').onclick = async () => {
-  const target = step === 3 ? 'simMsg' : 'loadMsg';
-  try { const j = await api('/api/snapshot/save'); msg(target, `Snapshot saved to ${j.file}`, true); } catch (e) { msg(target, e.message); }
+  $('btnSaveSnap').disabled = true;
+  try {
+    const j = await api('/api/snapshot/save', { download: true });
+    // Hand the file to the browser as a download, so it lands where the user expects (Downloads).
+    const blob = new Blob([JSON.stringify(j.snapshot, null, 1)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = j.name; document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+    toast('Policy snapshot saved', `Downloaded ${j.name}. A copy is also in ${j.file}. Open it later with "Open saved snapshot…".`);
+  } catch (e) { toast('Couldn\'t save snapshot', e.message, false); }
+  $('btnSaveSnap').disabled = !loaded;
 };
 
 // ---------- step 2 ----------
@@ -1027,13 +1060,15 @@ function compareView(j) {
 $('btnSim').onclick = async () => {
   if (!sid || !loaded) { msg('simMsg', 'Connect and load policies first.'); return; }
   $('btnSim').disabled = true; $('simMsg').innerHTML = '<span class="spinner"></span> Evaluating…';
+  $('simOut').innerHTML = ''; lastSim = null; // never leave the previous result on screen for a new question
   try {
     const body = formBody();
     if (body.picks.length === 2) {
       const j = await api('/api/simulate', body);
       lastSim = { body, result: j.compare[0] };
       const errs = Object.keys((j.snapshot && j.snapshot.errors) || {});
-      $('simOut').innerHTML = (errs.length ? `<div class="note" style="margin-bottom:10px">Not evaluated (failed to load): ${errs.map(esc).join(', ')}</div>` : '') + compareView(j);
+      const inc = j.compare.find((r) => r.summary && (r.summary.incomplete || []).length);
+      $('simOut').innerHTML = (inc ? incompleteBox(inc.summary) : '') + compareView(j);
       $('simMsg').textContent = ''; $('btnSim').disabled = false; return;
     }
     const j = await api('/api/simulate', body);
@@ -1041,12 +1076,16 @@ $('btnSim').onclick = async () => {
     const s = j.summary, c = j.context;
     rankingOn = !!c.adminRanking;
     const errs = Object.keys((j.snapshot && j.snapshot.errors) || {});
-    $('simOut').innerHTML = (errs.length ? `<div class="note" style="margin-bottom:10px">Not evaluated (failed to load): ${errs.map(esc).join(', ')}</div>` : '')
+    $('simOut').innerHTML = incompleteBox(s)
       + (j.pick ? `<div class="form-hint" style="margin-bottom:8px">Simulated as ${j.pick.kind === 'user' ? '👤' : '👥'} <b>${esc(pickLabel(j.pick))}</b>. Add a second user or group to compare.</div>` : '')
       + `<div class="tiles">${actionTile(s, c, j.modules)}${basedOnTile(s, c)}</div>`
       + changeCard(s, c, j.modules) + forwardingCard(j.modules.find((m) => m.module.startsWith('Forwarding')), s) + modulesCard(j.modules, s);
     $('simMsg').textContent = '';
-  } catch (e) { msg('simMsg', e.message); }
+  } catch (e) {
+    const timeout = /time ?out|ETIMEDOUT|504|408/i.test(e.message);
+    $('simMsg').textContent = '';
+    $('simOut').innerHTML = `<div class="incomplete"><div class="ph">⚠️ ${timeout ? 'Couldn\'t run: Zscaler timed out' : 'Couldn\'t run this simulation'}</div><div>${esc(e.message)}</div><div class="form-hint" style="margin-top:4px">Nothing was simulated. ${timeout ? 'Try again in a minute.' : ''}</div></div>`;
+  }
   $('btnSim').disabled = false;
 };
 

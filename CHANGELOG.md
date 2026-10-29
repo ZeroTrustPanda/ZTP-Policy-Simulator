@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.5 — 2026-10-29
+- App service groups (Office 365 / UCaaS One Click) evaluated by domain and published IP ranges; generic guard makes any unevaluated rule condition "unknown"; cloud apps, REDIR_ZPA, resolved-IP and file-type categories evaluated.
+- No caching: lookups re-queried per simulation, fresh bulk runs, no-store responses, stale result cleared.
+- Failed/timed-out policy sets and lookups reported ("Couldn't fully run: Zscaler timed out"); bulk column.
+- Save snapshot downloads in the browser with a confirmation; Open snapshot / bulk file pickers fixed; toasts.
+
 ## 1.8.4 — 2026-10-28
 - Admin rank: reads enableAdminRankAccess from ZIA advanced settings; when on, ZIA rules evaluate by rank then order; rank effects shown on the result; rank badges; new rules in policy changes take the anchor rule's rank.
 

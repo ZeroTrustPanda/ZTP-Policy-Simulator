@@ -125,7 +125,7 @@ const COLUMNS = [
   ['expected', 'Expected'], ['meets', 'Meets expectation'], ['area', 'Recommended area'], ['recommendation', 'Recommendation'],
   ['result', 'Result'], ['action', 'Policy rule action'], ['module', 'Deciding module'], ['rule', 'Deciding rule'], ['order', 'Rule order'],
   ['firewall', 'Firewall'], ['firewallRule', 'Firewall rule'], ['urlFiltering', 'URL filtering'], ['urlRule', 'URL filtering rule'], ['forwarding', 'Client Connector forwarding'],
-  ['alsoMatched', 'Also matched (first match wins)'], ['couldBlock', 'Could be blocked by'], ['conditions', 'Conditions that change the result'], ['notes', 'Notes'], ['error', 'Error'],
+  ['alsoMatched', 'Also matched (first match wins)'], ['incomplete', 'Not evaluated (failed/timeout)'], ['couldBlock', 'Could be blocked by'], ['conditions', 'Conditions that change the result'], ['notes', 'Notes'], ['error', 'Error'],
 ];
 function csvCell(v) {
   const s = v == null ? '' : String(v);
@@ -156,6 +156,7 @@ function resultRow(i, row, out, cat, expected, data) {
     urlFiltering: url.verdict || '', urlRule: url.decidingRule ? url.decidingRule.name : '',
     forwarding: fwd.verdict || '',
     alsoMatched: (() => { const mm = (s.multiMatch || []).find((x) => x.decides); return mm ? mm.also.map((e) => `${e.name}${e.order != null && e.order >= 0 ? ' (order ' + e.order + ')' : ''}${e.differs ? ' [' + e.action + ']' : ''}`).join('; ') : ''; })(),
+    incomplete: (s.incomplete || []).map((x) => `${x.module}${x.timeout ? ' — ZIA timed out' : ''}: ${String(x.error).slice(0, 80)}`).join(' | '),
     couldBlock: blk ? `${blk.condition} → rule "${blk.rule || blk.module}"` : '',
     conditions: (s.alsoBasedOn || []).length,
     notes: notes.slice(0, 3).join(' | '), error: '',
@@ -251,7 +252,8 @@ async function lookupAll(job, client, keys, cache, urlLookup, batchSize, timing 
 async function runJob(session, job, rows, opts, deps) {
   job.data = (session.snap && session.snap.data) || {};
   try {
-    const cache = session.catCache || (session.catCache = new Map());
+    // Fresh lookups for every run: nothing from an earlier run or single simulation is reused.
+    const cache = new Map(); session.userCache = new Map(); session.scimMember = new Map();
     if (opts.lookup && session.client) {
       job.phase = 'lookup';
       await lookupAll(job, session.client, rows.filter((r) => !r.categories).map((r) => lookupKey(r.target)), cache, deps.urlLookup, deps.URL_LOOKUP_MAX || 100, deps.timing);

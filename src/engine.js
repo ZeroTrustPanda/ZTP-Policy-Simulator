@@ -5,6 +5,7 @@
 
 const M = require('./matchers');
 const W = require('./workload');
+const AS = require('./appservices');
 
 const lc = (s) => String(s == null ? '' : s).toLowerCase();
 const arr = (x) => (Array.isArray(x) ? x : x == null || x === '' ? [] : [x]);
@@ -86,7 +87,7 @@ function critUrlCategories(rule, ctx, key = 'urlCategories') {
 }
 
 function critFileType(rule, ctx, key = 'fileTypes') {
-  const ft = nonAny(arr(rule[key]));
+  const ft = nonAny([...arr(rule[key]), ...arr(rule.fileTypeCategories)]);
   if (!ft.length) return { field: 'file type', status: 'any', detail: 'not restricted' };
   if (!ctx.fileType) return { field: 'file type', status: 'nomatch', detail: `no file in this transaction (rule needs ${ft.slice(0, 6).join(', ')}) — enter a file type to test a download/upload` };
   const r = fileTypeMatch(ft, ctx.fileType);
@@ -356,6 +357,20 @@ function critTimeWindows(rule) {
 // Criteria that exist on some rules but are not modelled; flagged unknown rather than silently ignored.
 const UNMODELLED = ['userAgentTypes', 'deviceTrustLevels', 'userRiskScoreLevels', 'deviceGroups', 'devices', 'labels', 'sourceCountries', 'cloudApplications', 'platforms', 'timeQuota', 'sizeQuota'];
 const UNMODELLED_LABEL = { userAgentTypes: 'User agent', deviceTrustLevels: 'Device trust', userRiskScoreLevels: 'User risk score', deviceGroups: 'Device group', devices: 'Device', labels: 'Rule label', workloadGroups: 'Workload group', sourceCountries: 'Source country', cloudApplications: 'Cloud app', platforms: 'Platform', timeQuota: 'Time quota', sizeQuota: 'Size quota' };
+// Cloud applications on a rule (e.g. SSL "UCaaS One Click" → ZOOM, WEBEX, …): matched against the cloud app Zscaler's
+// URL lookup returned for the destination. With no lookup the condition is unknown; never "any".
+function critCloudApps(rule, ctx) {
+  const apps = nonAny(arr(rule.cloudApplications).map((a) => (a && (a.name || a.id)) || a));
+  if (!apps.length) return null;
+  const list = apps.slice(0, 5).join(', ') + (apps.length > 5 ? '…' : '');
+  if (ctx.cloudApp) {
+    const ok = apps.some((a) => norm(a) === norm(ctx.cloudApp));
+    return { field: 'cloud app', status: ok ? 'match' : 'nomatch', detail: `destination is cloud app ${ctx.cloudApp}; rule ${list}` };
+  }
+  if (ctx.categorySource === 'Zscaler lookup') return { field: 'cloud app', status: 'nomatch', detail: `Zscaler maps the destination to no cloud app; rule applies to ${list}` };
+  return { field: 'cloud app', status: 'unknown', scope: `Cloud app ${list}`, detail: `rule applies to cloud apps ${list}; the destination's cloud app isn't known (no Zscaler lookup)` };
+}
+
 function critUnmodelled(rule, skip = []) {
   const out = [];
   for (const k of UNMODELLED) {
@@ -445,9 +460,30 @@ function ruleAction(rule) {
 // Generic ordered module evaluator.
 // mode 'first': first definite match decides; unknown rules ahead of it are "could override".
 // mode 'content': content-dependent (DLP): report all rules whose non-content criteria match.
+// Fields that describe a rule rather than restrict which traffic it matches, or that are evaluated outside the
+// criteria (content-dependent DLP/sandbox, Cloud App Control's app list and actions).
+const NOT_CRITERIA = new Set(['lastModifiedBy', 'action', 'actions', 'labels', 'dlpEngines', 'dlpDictionaries', 'cbiProfile', 'baPolicyCategories', 'zpaIpGroup', 'applications',
+  'auditorNotification', 'notificationTemplate', 'icapServer', 'zscalerIncidentReceiver', 'subRules', 'parentRule', 'smartIsolationProfile', 'redirectUrl', 'proxyGateway', 'zpaGateway',
+  '_acts', 'eunTemplate', 'browserEunTemplate', 'excludeSrcCountries']);
+const FIELD_LABEL = { resCategories: 'Resolved IP category', fileTypeCategories: 'File type category', destIpv6Groups: 'Destination IPv6 group', srcIpv6Groups: 'Source IPv6 group',
+  appServices: 'App service', deviceGroups: 'Device group', urlCategories2: 'URL category (2)', sourceCountries: 'Source country' };
+// Every criterion the simulator doesn't evaluate becomes "unknown", so a rule can never look like it matches
+// everything just because its only conditions are ones the simulator doesn't read (e.g. "Office 365 One Click Rule").
+function withGuard(r, buildCrits) {
+  const seen = new Set();
+  const proxy = new Proxy(r, { get(t, k) { if (typeof k === 'string') seen.add(k); return t[k]; } });
+  const crits = buildCrits(proxy).filter(Boolean);
+  for (const [k, v] of Object.entries(r)) {
+    if (seen.has(k) || NOT_CRITERIA.has(k) || !Array.isArray(v) || !v.length) continue;
+    const vals = v.map((x) => (x && typeof x === 'object' ? x.name || x.id : x)).filter((x) => x != null && !/^(any|any_rule|none)$/i.test(String(x)));
+    if (!vals.length) continue;
+    crits.push({ field: k, status: 'unknown', kind: 'other', scope: `${FIELD_LABEL[k] || k}: ${vals.slice(0, 3).join(', ')}`, detail: `rule restricts ${FIELD_LABEL[k] || k} (${vals.slice(0, 4).join(', ')}) — not evaluated by the simulator` });
+  }
+  return crits;
+}
 function runModule(module, rules, buildCrits, { blockRe, allowRe, defaultVerdict = 'ALLOW', defaultReason = 'no matching rule (default action)', skipNote, ranked = false } = {}) {
   const sorted = sortRules(rules, ranked).filter((r) => lc(r.state) !== 'disabled');
-  const evaluated = sorted.map((r) => Object.assign(evalRule(r, buildCrits(r)), isDefaultRule(r) ? { _default: true } : {}));
+  const evaluated = sorted.map((r) => Object.assign(evalRule(r, withGuard(r, buildCrits)), isDefaultRule(r) ? { _default: true } : {}));
   const decidingIdx = evaluated.findIndex((e) => e.status === 'match');
   const preempt = evaluated.slice(0, decidingIdx < 0 ? evaluated.length : decidingIdx).filter((e) => e.status === 'unknown');
   const deciding = decidingIdx >= 0 ? evaluated[decidingIdx] : null;
@@ -473,27 +509,44 @@ function runModule(module, rules, buildCrits, { blockRe, allowRe, defaultVerdict
 function mUrlFiltering(snap, ctx) {
   return runModule('URL Filtering', snap.urlFilteringRules, (r) => [
     critProtocol(r, ctx), critUrlCategories(r, ctx), critMethod(r, ctx), critIdentity(r, ctx), critLocation(r, ctx), critSourceIp(r, ctx, snap), critTimeWindows(r),
-    W.critWorkload(r, ctx), ...critUnmodelled(r, ['cloudApplications']),
+    W.critWorkload(r, ctx), critCloudApps(r, ctx), ...critUnmodelled(r, ['cloudApplications']),
   ].filter(Boolean), { ranked: rankOn(snap), blockRe: /^(BLOCK)$/, allowRe: /^(ALLOW|CAUTION|ISOLATE)$/ });
 }
 
 function mFirewall(snap, ctx) {
   const web = (ctx.protocol || 'tcp') === 'tcp' && (ctx.port === 80 || ctx.port === 443 || (ctx.target && /^https?$/.test(ctx.target.scheme || '')));
   const res = runModule('Firewall', snap.firewallRules, (r) => [
-    critSourceIp(r, ctx, snap), critDest(r, ctx, snap), critServices(r, ctx, snap), critApps(r, ctx, snap), critIdentity(r, ctx), critLocation(r, ctx), critTimeWindows(r),
-    W.critWorkload(r, ctx), ...critUnmodelled(r, ['sourceCountries', 'cloudApplications']),
+    critSourceIp(r, ctx, snap), critDest(r, ctx, snap), critServices(r, ctx, snap), critApps(r, ctx, snap), AS.critAppServices(r, ctx, snap), critIdentity(r, ctx), critLocation(r, ctx), critTimeWindows(r),
+    W.critWorkload(r, ctx), critCloudApps(r, ctx), ...critUnmodelled(r, ['sourceCountries', 'cloudApplications']),
   ].filter(Boolean), { ranked: rankOn(snap), blockRe: /^BLOCK/, allowRe: /^(ALLOW|EVAL_NWAPP)$/, defaultReason: 'no matching rule (default firewall rule applies)' });
   if (web) res.note = 'Ports 80/443 normally pass through the web proxy path (URL filtering etc.); firewall rules apply to all-port traffic from ZCC/GRE/IPsec depending on "Enable Firewall" and location settings.';
   return res;
 }
 
+// DNS: category of the IP the name resolves to. The simulator has the destination's category, used as the stand-in.
+function critResCategories(rule, ctx) {
+  const cats = nonAny(arr(rule.resCategories).map((c) => (c && c.name) || c));
+  if (!cats.length) return null;
+  const have = ctx.categories || [];
+  if (!have.length) return { field: 'resolved IP category', status: 'unknown', scope: 'Resolved IP category ' + cats.slice(0, 3).join(', '), detail: `rule applies when the answer IP is in ${cats.slice(0, 5).join(', ')}; no category known` };
+  const hit = cats.filter((c) => have.some((h) => lc(h) === lc(c)));
+  return hit.length ? { field: 'resolved IP category', status: 'match', detail: `destination category ${hit.join(', ')} (used for the resolved IP)` } : { field: 'resolved IP category', status: 'nomatch', detail: `destination category ${have.join(', ')}; rule ${cats.slice(0, 5).join(', ')}` };
+}
+// DNS rules that redirect to the ZPA resolver ("ZPA Resolver for Locations") only apply to names that are ZPA
+// application segments; the API shows them with no destination criteria.
+function critZpaRedirect(rule, ctx, snap) {
+  if (!/REDIR_ZPA/i.test(String(ruleAction(rule) || ''))) return null;
+  if (!snap.zpaApps) return { field: 'ZPA application', status: 'unknown', scope: 'ZPA application domains', detail: 'redirects ZPA application names to ZPA; ZPA segments not loaded' };
+  const z = zpaMatch(snap, ctx);
+  return z.apps.length ? { field: 'ZPA application', status: 'match', detail: `${ctx.target.host} is ZPA segment "${z.apps[0].name}"` } : { field: 'ZPA application', status: 'nomatch', detail: `${ctx.target ? ctx.target.host : 'destination'} is not a ZPA application segment` };
+}
 function mDns(snap, ctx) {
   const dnsCtx = Object.assign({}, ctx);
   return runModule('DNS Control', snap.dnsRules, (r) => {
     const proto = nonAny(r.protocols);
     return [
       proto.length ? { field: 'dns protocol', status: ctx.dnsProtocol ? (proto.some((p) => lc(p).startsWith(lc(ctx.dnsProtocol))) ? 'match' : 'nomatch') : 'unknown', detail: `rule ${proto.join(', ')}` } : null,
-      critSourceIp(r, dnsCtx, snap), critDest(r, dnsCtx, snap), critIdentity(r, ctx), critLocation(r, ctx), critTimeWindows(r), W.critWorkload(r, ctx),
+      critSourceIp(r, dnsCtx, snap), critDest(r, dnsCtx, snap), AS.critAppServices(r, ctx, snap), critResCategories(r, ctx), critZpaRedirect(r, ctx, snap), critIdentity(r, ctx), critLocation(r, ctx), critTimeWindows(r), W.critWorkload(r, ctx),
       nonAny(r.applications).length ? (() => {
         const apps = nonAny(r.applications);
         if (ctx.application) { const ok = apps.some((a) => lc(a) === lc(ctx.application)); return { field: 'dns application', status: ok ? 'match' : 'nomatch', detail: `${ctx.application} ${ok ? 'in' : 'not in'} ${apps.slice(0, 5).join(', ')}` }; }
@@ -507,7 +560,7 @@ function mDns(snap, ctx) {
 function mSandbox(snap, ctx) {
   return runModule('Sandbox (Behavioral Analysis)', snap.sandboxRules, (r) => [
     critFileType(r, ctx), critUrlCategories(r, ctx), critProtocol(r, ctx), critIdentity(r, ctx), critLocation(r, ctx),
-    W.critWorkload(r, ctx), ...critUnmodelled(r, ['cloudApplications']),
+    W.critWorkload(r, ctx), critCloudApps(r, ctx), ...critUnmodelled(r, ['cloudApplications']),
   ].filter(Boolean), { ranked: rankOn(snap), blockRe: /BLOCK/, allowRe: /ALLOW/, defaultReason: 'no matching rule (file is not held for sandbox analysis by policy)' });
 }
 
@@ -517,7 +570,7 @@ function mFileType(snap, ctx) {
     critFileType(r, ctx), critUrlCategories(r, ctx),
     nonAny(r.operation).length ? { field: 'operation', status: op ? (lc(r.operation) === lc(op) || lc(r.operation) === 'any' ? 'match' : 'nomatch') : 'unknown', detail: `rule ${r.operation}` } : null,
     critProtocol(r, ctx), critIdentity(r, ctx), critLocation(r, ctx), critTimeWindows(r),
-    W.critWorkload(r, ctx), ...critUnmodelled(r, ['cloudApplications']),
+    W.critWorkload(r, ctx), critCloudApps(r, ctx), ...critUnmodelled(r, ['cloudApplications']),
   ].filter(Boolean), { ranked: rankOn(snap), blockRe: /BLOCK/, allowRe: /ALLOW|CAUTION/, defaultReason: 'no matching rule (file type allowed)' });
 }
 
@@ -525,7 +578,7 @@ function mFileType(snap, ctx) {
 function mDlp(snap, ctx) {
   const res = runModule('Data Loss Prevention', snap.webDlpRules, (r) => [
     critFileType(r, ctx), critUrlCategories(r, ctx), critProtocol(r, ctx), critIdentity(r, ctx), critLocation(r, ctx), critTimeWindows(r),
-    W.critWorkload(r, ctx), ...critUnmodelled(r, ['cloudApplications']),
+    W.critWorkload(r, ctx), critCloudApps(r, ctx), ...critUnmodelled(r, ['cloudApplications']),
   ].filter(Boolean), { ranked: rankOn(snap), blockRe: /BLOCK/, allowRe: /ALLOW/, defaultReason: 'no DLP rule applies to this transaction' });
   const candidates = res.rules.filter((r) => r.status !== 'nomatch');
   const rules = sortRules(snap.webDlpRules, rankOn(snap));
@@ -548,8 +601,8 @@ function mDlp(snap, ctx) {
 function mSsl(snap, ctx) {
   const https = ctx.port === 443 || (ctx.target && ctx.target.scheme === 'https') || (!ctx.port && !(ctx.target && ctx.target.scheme));
   const res = runModule('SSL Inspection', snap.sslRules, (r) => [
-    critUrlCategories(r, ctx, 'urlCategories'), critDest(Object.assign({}, r, { destIpCategories: [], destCountries: [] }), ctx, snap), critIdentity(r, ctx), critLocation(r, ctx), critSourceIp(r, ctx, snap),
-    W.critWorkload(r, ctx), ...critUnmodelled(r, ['cloudApplications', 'platforms']),
+    critUrlCategories(r, ctx, 'urlCategories'), critDest({ destAddresses: r.destAddresses, destIpGroups: r.destIpGroups }, ctx, snap), critIdentity(r, ctx), critLocation(r, ctx), critSourceIp(r, ctx, snap),
+    W.critWorkload(r, ctx), critCloudApps(r, ctx), ...critUnmodelled(r, ['cloudApplications', 'platforms']),
   ].filter(Boolean), { ranked: rankOn(snap), blockRe: /BLOCK/, allowRe: /DECRYPT/, defaultReason: 'no matching rule (default SSL inspection action)' });
   if (res.decidingRule) {
     const a = res.decidingRule.action;
@@ -1044,7 +1097,7 @@ function mConnectorForwarding(data, ctx) {
   };
   const appSvc = (r) => (arr(r.appServiceGroups).length ? { field: 'app service group', status: 'unknown', kind: 'input', scope: `App service group ${names(r.appServiceGroups).join(', ')}`, detail: `rule applies to app service group ${names(r.appServiceGroups).join(', ')} (Zscaler-managed destinations) — not evaluated` } : null);
   const res = runModule(CONN_MODULE, all.map((r) => Object.assign({}, r, { order: r._seq, _order: r.order })), (r) => [
-    stray(r), appSvc(r),
+    stray(r), AS.critAppServices(r, ctx, data),
     critSourceIp(r, ctx, view), W.critWorkload(r, ctx, 'srcWorkloadGroups'), critEcGroup(r, ctx), critLocation(r, ctx),
     critDest(r, ctx, view), critUrlCategories(r, ctx, 'resCategories'), critServices(r, ctx, view), critApps(r, ctx, view), critTimeWindows(r),
     /^(ZPA|ECZPA)$/i.test(r.forwardMethod || '') ? critZpaSegments(r, ctx, z) : null,
@@ -1075,6 +1128,8 @@ function mConnectorForwarding(data, ctx) {
   if (d && d.forward.wanSelection && !/^(NONE|INVALID)?$/i.test(d.forward.wanSelection)) out.note = `WAN selection: ${d.forward.wanSelection}`;
   return out;
 }
+
+const isTimeout = (e) => /ETIMEDOUT|timed? ?out|timeout|HTTP (408|504)|ESOCKETTIMEDOUT|ECONNRESET/i.test(String((e && e.message) || e || ''));
 
 // ---------- top-level ----------
 function simulate(snap, ctx, manual = {}) {
@@ -1145,9 +1200,25 @@ function simulate(snap, ctx, manual = {}) {
     web ? mFileType(data, c2) : na('File Type Control'),
     web ? mDlp(data, c2) : na('Data Loss Prevention'),
   ];
+  // A policy set that failed to load (timeout, permission, …) must not look like "no rule matched → default action".
+  const errs = (snap && snap.errors) || {};
+  const SRC = { 'URL Filtering': 'urlFilteringRules', Firewall: 'firewallRules', 'DNS Control': 'dnsRules', 'SSL Inspection': 'sslRules', 'Sandbox (Behavioral Analysis)': 'sandboxRules',
+    'File Type Control': 'fileTypeRules', 'Data Loss Prevention': 'webDlpRules', 'Cloud App Control': 'cloudAppRules', 'Advanced Threat Protection': 'atpSettings', 'ZPA Access Policy': 'zpaAccessRules', [CONN_MODULE]: 'ztwForwardingRules' };
+  const incomplete = [];
+  for (let i = 0; i < modules.length; i++) {
+    const m = modules[i]; const key = m && SRC[m.module];
+    if (!key || !errs[key] || m.verdict === 'N/A') continue;
+    const timeout = isTimeout(errs[key]);
+    incomplete.push({ module: m.module, error: errs[key], timeout });
+    modules[i] = { module: m.module, verdict: 'NOT_EVALUATED', confidence: 'unknown', decidingRule: null, couldOverride: [], rules: [], considered: 0, connector: m.connector, forward: m.forward,
+      reason: `Not evaluated: ${m.module} policy couldn't be loaded${timeout ? ' (ZIA timed out)' : ''} — ${String(errs[key]).slice(0, 160)}. Reload policies.` };
+  }
   // Live state that doesn't change the policy verdict but decides whether it works in practice.
   if (zpa && (zpa.matchedSegments || []).length) zpa.pathHealth = require('./live').zpaPathHealth(data, zpa.matchedSegments[0].id);
   const summary = summarize(modules, c2);
+  // Lookups or policy sets that failed: the result can't be trusted for those parts, so say so plainly.
+  for (const e of c2.lookupErrors || []) incomplete.push(e);
+  if (incomplete.length) summary.incomplete = incomplete;
   { const dm = modules.find((m) => m && m.decidingRule && summary.primary && m.decidingRule.name === summary.primary.rule && m.module === summary.primary.module);
     if (dm && dm.rankOrdered) summary.rank = { on: true, rank: rankOf(dm.decidingRule), effects: dm.rankEffects || [] }; }
   summary.multiMatch = modules.filter((m) => m && m.decidingRule && (m.alsoMatched || []).length)
@@ -1219,13 +1290,13 @@ function summarize(modules, ctx = {}) {
     if (zpa.deviceConditional) { const f = zpa.deviceConditional.fail; alsoBasedOn.unshift({ kind: 'zpa', condition: `If the ${zpa.deviceConditional.postures.join(' / ') || 'device posture'} check fails`, action: f.action, module: 'ZPA Access Policy', rule: f.rule, order: f.order, detail: f.rule ? null : 'No rule allows it, so ZPA denies by default' }); }
     if (zpa.onNet) alsoBasedOn.push({ kind: 'zpa', condition: `On a trusted (on-net) network: segment "${zpa.onNet.segment}" bypasses ZPA`, action: 'BYPASS', module: 'ZPA segment', rule: null, detail: 'Then it is handled as internet traffic (Client Connector / ZIA)' });
   } else {
-    const pipeline = modules.filter((m) => !m.module.startsWith('Forwarding') && m.module !== 'ZPA Access Policy' && !['N/A'].includes(m.verdict));
+    const pipeline = modules.filter((m) => !m.module.startsWith('Forwarding') && m.module !== 'ZPA Access Policy' && !['N/A', 'NOT_EVALUATED'].includes(m.verdict));
     const finalIdx = pipeline.findIndex((m) => ['BLOCK', 'ISOLATE', 'CAUTION'].includes(m.verdict) && m.confidence === 'definite' && !(m.module === 'Data Loss Prevention'));
     const upto = finalIdx >= 0 ? pipeline.slice(0, finalIdx + 1) : pipeline;
     if (finalIdx >= 0) { const m = pipeline[finalIdx]; zia = pick(m, m.verdict); lines.push(`${m.verdict === 'BLOCK' ? 'Blocked' : m.verdict === 'ISOLATE' ? 'Isolated' : 'Cautioned'} by ${label(m)}`); }
     else {
       const url = by['URL Filtering'];
-      zia = url && url.verdict !== 'N/A' ? pick(url, 'ALLOW') : (pipeline[0] ? pick(pipeline.find((m) => m.module === 'Firewall') || pipeline[0], 'ALLOW') : { module: 'ZIA', action: 'ALLOW', rule: null, criteria: [], reason: 'No ZIA module applies' });
+      zia = url && !['N/A', 'NOT_EVALUATED'].includes(url.verdict) ? pick(url, 'ALLOW') : (pipeline[0] ? pick(pipeline.find((m) => m.module === 'Firewall') || pipeline[0], 'ALLOW') : { module: 'ZIA', action: 'ALLOW', rule: null, criteria: [], reason: 'No ZIA module applies' });
       for (const m of pipeline) {
         if (m.module === 'Data Loss Prevention' && m.verdict !== 'ALLOW') continue;
         allowedBy.push({ module: m.module, rule: m.decidingRule ? m.decidingRule.name : null, order: m.decidingRule ? m.decidingRule.order : null, action: m.decidingRule ? m.decidingRule.action : m.verdict, reason: m.reason, confidence: m.confidence });
@@ -1287,4 +1358,4 @@ function summarize(modules, ctx = {}) {
   return { overall, headline, primary, alsoBasedOn: conds, decider, allowedBy, bypasses, inspections, lines };
 }
 
-module.exports = { rankOn, rankOf, mConnectorForwarding, CONN_MODULE, simulate, rationalize, mCloudApp, cacAction, ATP_CATEGORY_MAP, WELL_KNOWN, fileTypeMatch, FILETYPE_ALIASES, mUrlFiltering, mFirewall, mDns, mSandbox, mFileType, mDlp, mSsl, mAtp, mZpa, mForwarding, sortRules };
+module.exports = { isTimeout, rankOn, rankOf, mConnectorForwarding, CONN_MODULE, simulate, rationalize, mCloudApp, cacAction, ATP_CATEGORY_MAP, WELL_KNOWN, fileTypeMatch, FILETYPE_ALIASES, mUrlFiltering, mFirewall, mDns, mSandbox, mFileType, mDlp, mSsl, mAtp, mZpa, mForwarding, sortRules };

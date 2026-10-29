@@ -10,7 +10,7 @@ const changes = require('./src/changes');
 const bulk = require('./src/bulk');
 const recommend = require('./src/recommend');
 const live = require('./src/live');
-const { simulate, rationalize } = require('./src/engine');
+const { simulate, rationalize, isTimeout } = require('./src/engine');
 const M = require('./src/matchers');
 const VERSION = require('./package.json').version;
 
@@ -21,6 +21,8 @@ const sessions = new Map(); // id -> {client, snap, demo, job, last}
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
+// Every API answer is computed fresh: no browser or proxy caching of results.
+app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store, no-cache, must-revalidate'); res.set('Pragma', 'no-cache'); next(); });
 app.use(express.static(path.join(__dirname, 'public')));
 
 setInterval(() => { const now = Date.now(); for (const [k, v] of sessions) if (now - v.last > SESSION_TTL && !(v.bulk && ['lookup', 'simulate', 'queued'].includes(v.bulk.phase))) sessions.delete(k); }, 60000).unref();
@@ -111,17 +113,19 @@ app.post('/api/diagnostics', (req, res) => {
 });
 
 // Save the loaded policy snapshot (rules only — no credentials or tokens) for offline use / troubleshooting.
-app.post('/api/snapshot/save', (req, res) => {
+app.post('/api/snapshot/save', wrap(async (req, res) => {
   const s = getSession(req, res); if (!s) return;
   if (!s.snap) return res.status(409).json({ error: 'Load policies first.' });
   const fs = require('fs'), os = require('os');
   const dir = path.join(os.homedir(), 'ZTP-Policy-Simulator', 'snapshots');
-  fs.mkdirSync(dir, { recursive: true });
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
   const tenant = (s.client && s.client.tokenHost.split('.')[0]) || 'demo';
   const file = path.join(dir, `${tenant}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-  fs.writeFileSync(file, JSON.stringify({ tool: 'ztp-policy-simulator', version: VERSION, tenant, loadedAt: s.snap.loadedAt, errors: s.snap.errors, data: s.snap.data }, null, 1));
-  res.json({ file });
-});
+  const snapshot = { tool: 'ztp-policy-simulator', version: VERSION, tenant, loadedAt: s.snap.loadedAt, errors: s.snap.errors, data: s.snap.data };
+  let saved = null;
+  try { fs.writeFileSync(file, JSON.stringify(snapshot, null, 1)); saved = file; } catch (e) { if (!req.body.download) throw e; }
+  res.json({ file: saved || '(not written: ' + dir + ' is not writable)', name: path.basename(file), snapshot: req.body.download ? snapshot : undefined });
+}));
 
 // Open a saved snapshot (offline simulation, no tenant connection).
 app.post('/api/snapshot/open', wrap(async (req, res) => {
@@ -163,7 +167,8 @@ async function buildContext(s, b) {
   }
   if (b.categories && b.categories.length) { ctx.categories = b.categories; ctx.categorySource = b.noLookup ? 'precomputed' : 'entered'; }
   else if (tg && !b.noLookup && !s.demo && s.client) {
-    // Zscaler classification for the destination: hostnames and single IPs (not CIDRs/ranges). Cached per session.
+    // Zscaler classification for the destination: hostnames and single IPs (not CIDRs/ranges). Looked up fresh for
+    // every simulation (the cache is flushed at the start of each /api/simulate).
     const key = bulk.lookupKey(tg.raw || tg.host);
     if (key) {
       s.catCache = s.catCache || new Map();
@@ -180,7 +185,11 @@ async function buildContext(s, b) {
         ctx.categorySource = 'Zscaler lookup';
         if (tg.isWildcard) ctx.notes.push(`Wildcard query: categories taken from probe host ${key}.`);
         if (c.error) ctx.notes.push(`Zscaler returned no category for ${key}.`);
-      } catch (e) { ctx.notes.push(`Category lookup failed: ${e.message}`); }
+      } catch (e) {
+        const timeout = isTimeout(e);
+        ctx.notes.push(`Category lookup failed${timeout ? ' (ZIA timed out)' : ''}: ${e.message}`);
+        (ctx.lookupErrors = ctx.lookupErrors || []).push({ module: 'Zscaler category lookup', error: e.message, timeout, effect: 'URL-category rules were evaluated without the destination\'s category' });
+      }
     } else if (tg.isIp) ctx.notes.push('Category lookup skipped: CIDRs and ranges have no single classification — enter one IP to look it up.');
   }
   // Accept pasted text like "288261371856945305 = jane@acme.org": use the email in it.
@@ -206,7 +215,11 @@ async function buildContext(s, b) {
         ctx.notes.push(`User ${u.email || u.name} found in ${u.source}: ${u.groups.length} group${u.groups.length === 1 ? '' : 's'}${u.groups.length ? ' (' + u.groups.slice(0, 8).join(', ') + (u.groups.length > 8 ? ', …' : '') + ')' : ''}.`);
         if (u.ziaError) ctx.notes.push(`ZIA's user list refused this API client (${/HTTP (\d+)/.exec(u.ziaError) ? /HTTP (\d+)/.exec(u.ziaError)[1] : 'error'}), so groups came from ZIdentity.`);
       } else ctx.notes.push(`User "${b.user}" not found in ZIA or ZIdentity${s.client._zidDiag ? ` (${s.client._zidDiag})` : ''}.`);
-    } catch (e) { ctx.notes.push(`User lookup failed: ${e.message}`); }
+    } catch (e) {
+      const timeout = isTimeout(e);
+      ctx.notes.push(`User lookup failed${timeout ? ' (timed out)' : ''}: ${e.message}`);
+      (ctx.lookupErrors = ctx.lookupErrors || []).push({ module: 'User lookup', error: e.message, timeout, effect: 'user and group conditions were evaluated without the user\'s groups' });
+    }
   }
   // ZPA's own record of the user: SCIM group membership per SCIM-enabled IdP (what ZPA evaluates SCIM_GROUP against).
   const dz = s.snap && s.snap.data;
@@ -260,6 +273,8 @@ async function buildContext(s, b) {
 app.post('/api/simulate', wrap(async (req, res) => {
   const s = getSession(req, res); if (!s) return;
   if (!s.snap) return res.status(409).json({ error: 'Policies are not loaded yet. Click "Load policies" first.' });
+  // Flush every per-session lookup cache: each simulation re-queries categories, the user and ZPA SCIM membership.
+  s.catCache = new Map(); s.userCache = new Map(); s.scimMember = new Map();
   const b = req.body;
   if (!b.target && !b.ip && !b.port && !b.networkService && !b.application && !b.fileType) return res.status(400).json({ error: 'Enter at least a destination, port, network service, application or file type.' });
   // Who: picks[] holds up to two identities (user or group). One → simulate as it; two → compare side by side.
@@ -403,7 +418,7 @@ app.post('/api/lookup', wrap(async (req, res) => {
   if (!entries.length) return res.status(400).json({ error: 'Enter a URL, host or IP to look up.' });
   if (entries.length > URL_LOOKUP_MAX) return res.status(400).json({ error: `Up to ${URL_LOOKUP_MAX} entries at a time. Use Bulk test for more.` });
   if (!s.client) return res.status(409).json({ error: 'Category lookup needs a live tenant connection (not sample policies or an offline snapshot).' });
-  s.catCache = s.catCache || new Map();
+  s.catCache = new Map(); // fresh lookup every time
   const keys = entries.map((e) => ({ entry: e, key: bulk.lookupKey(e) }));
   const need = [...new Set(keys.map((k) => k.key).filter((k) => k && !(s.catCache.has(k) && !s.catCache.get(k).error)))];
   if (need.length) {
