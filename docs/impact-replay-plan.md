@@ -2,7 +2,7 @@
 
 Question it answers: "If I block site X (or apply this wizard change), how many users and transactions would be blocked that aren't today?" ZIA has no native what-if, so we replay exported logs through `src/engine.js` against the current policy and a proposed copy, and keep only records whose outcome changes.
 
-Status: skeleton only (`src/replay/index.js`, fail-safe `not_implemented` returns). Nothing wired into `server.js` or the UI yet.
+Status: **phases 1–2 done** (parsers, aggregation, offline proposed policy; `src/replay/`). Phase 3 `simulateDiff()` still a fail-safe stub; nothing wired into `server.js` or the UI yet.
 
 ## Inputs (per Research notes, 2026-10-30)
 - **Web Insights CSV**: one row per transaction (weight aggregation optional). Headers vary by report, so parse **by header name**, never by position. Confirmed columns: `User`, `Department`, `Policy Action`, `Blocked Policy Name`, `URL Filtering Policy Name`. Full header set unverified.
