@@ -1,0 +1,3 @@
+Logged Time,User,Department,Location,URL,URL Category,Policy Action,Blocked Policy Type,Blocked Policy Name,URL Filtering Policy Name,Client IP
+"October 30, 2026 2:02:11 PM",alice@example.com,Engineering,HQ,social.example.com/feed,Social Networking,Allowed,,,Allow_Social,192.0.2.10
+"October 30, 2026 2:03:40 PM",bob@example.com,Sales,Branch-1,games.example.com/play,Games,Blocked,URL Filtering,Block_Games,Block_Games,192.0.2.11

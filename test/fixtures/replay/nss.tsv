@@ -1,0 +1,2 @@
+Fri Oct 30 14:02:11 2026	alice@example.com	Engineering	HQ	social.example.com/feed	Social Networking	Allowed	Allowed	None	Allow_Social	192.0.2.10
+Fri Oct 30 14:03:40 2026	bob@example.com	Sales	Branch-1	games.example.com/play	Games	Blocked	Not allowed to browse this category	Block_Games	Block_Games	192.0.2.11
