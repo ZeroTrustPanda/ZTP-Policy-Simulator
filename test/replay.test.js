@@ -123,15 +123,17 @@ test('proposedPolicy returns plan errors without applying', async () => {
 test('Web Insights export layout: preamble, Event Time with zone abbreviation, block-reason actions, trailing comma', async () => {
   const stats = {};
   const rows = await collect(R.parseWebInsights(read('webinsights-export.csv'), stats));
-  assert.strictEqual(stats.rows, 4); assert.strictEqual(stats.skipped, 0);
+  assert.strictEqual(stats.rows, 7); assert.strictEqual(stats.skipped, 0);
   assert.ok(!stats.unknownColumns.includes('') && !stats.unknownColumns.includes('No.'));
   assert.ok(!stats.unknownColumns.includes('Event Time') && !stats.unknownColumns.includes('Blocked Policy Type'));
   const [a, b, c, d] = rows;
+  assert.strictEqual(R.record({ url: 'a.example.com', action: 'Blocked due to Bad SSL record' }).action, 'BLOCKED');
+  assert.strictEqual(R.record({ url: 'a.example.com', action: 'TLS handshake failed' }).action, 'SSL_FAILED');
   assert.strictEqual(a.time, '2026-11-02T13:50:15.000Z'); assert.strictEqual(a.tzSource, 'PST');
   assert.strictEqual(a.host, 'social.example.com'); assert.strictEqual(a.location, 'Example HQ'); assert.strictEqual(a.dept, 'Dept-A');
   assert.strictEqual(a.urlSuperCat, 'Internet Communication'); assert.strictEqual(a.action, 'ALLOWED'); assert.strictEqual(a.blockedBy, null);
   assert.strictEqual(b.action, 'BLOCKED'); assert.strictEqual(b.blockedBy, 'DNS Over HTTPS Services'); assert.strictEqual(b.ruleType, null);
-  assert.strictEqual(c.action, 'BLOCKED'); assert.strictEqual(c.host, 'games.example.com');
+  assert.strictEqual(c.action, 'SSL_FAILED'); assert.strictEqual(c.host, 'games.example.com');
   // 9:30 PM PST Nov 2 = 00:30 EST Nov 3 -> Eastern trend day is Nov 3
   assert.deepStrictEqual((await R.aggregate([d]))[0].days, { '2026-11-03': 1 });
 });
@@ -142,6 +144,19 @@ test('zone abbreviations: explicit offsets win; unknown ones fall back to opts.t
   assert.strictEqual(t('July 1, 2026 5:50:15 AM PDT'), '2026-07-01T12:50:15.000Z');
   assert.strictEqual(t('November 2, 2026 5:50:15 AM UTC', { tz: 'America/Chicago' }), '2026-11-02T05:50:15.000Z');
   assert.strictEqual(t('November 2, 2026 5:50:15 AM XYZ'), '2026-11-02T10:50:15.000Z'); // unknown -> Eastern (EST)
+});
+
+test('simulateDiff: failed SSL handshakes get their own group, never blocked', async () => {
+  const { live, proposed } = await blockedProposal();
+  const recs = await R.aggregate(R.parseWebInsights(read('webinsights-export.csv')));
+  const d = R.simulateDiff(recs, live, proposed);
+  assert.strictEqual(d.sslFailed.status, 'sslFailed'); assert.strictEqual(d.sslFailed.label, 'failed SSL, not inspected');
+  assert.strictEqual(d.sslFailed.transactions, 3); assert.strictEqual(d.totals.sslFailedTransactions, 3);
+  assert.deepStrictEqual(d.sslFailed.hosts.map((h) => h.key).sort(), ['blocked.example.com', 'games.example.com', 'legacy.example.com']);
+  // blocked.example.com: the allowed row is newly blocked; the SSL-failed row is not counted anywhere else.
+  assert.strictEqual(d.newlyBlocked.transactions, 1); assert.strictEqual(d.newlyBlocked.rows[0].user, 'user1@example.com');
+  for (const g of ['newlyBlocked', 'alreadyBlocked', 'newlyAllowed']) assert.ok(!d[g].rows.some((r) => r.loggedAction === 'SSL_FAILED'), g);
+  assert.ok(!d.alreadyBlocked.rows.some((r) => r.host === 'games.example.com'));
 });
 
 // ---------- time zones ----------

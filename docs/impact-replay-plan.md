@@ -21,6 +21,13 @@ Status: **phases 1–3 done** (parsers, aggregation, offline proposed policy, `s
 
 **Total for phases 1–4 + tests: ~6.5–8.5 working days (~50–65 h).** Phase 5 adds 2–3 days.
 
+## Outcome groups
+
+`simulateDiff` reports `newlyBlocked`, `newlyAllowed`, `alreadyBlocked` and `sslFailed`.
+**sslFailed ("failed SSL, not inspected")**: rows whose action is a TLS/SSL handshake failure (Web Insights: "Dropped due to failed client SSL handshake"; normalized action `SSL_FAILED`). The connection failed before any policy was applied, so these rows are never counted as newly or already blocked and are not simulated. The group has a transaction count, distinct users and the top hosts as hints for possible SSL inspection exemptions. Other SSL-related actions that name a block (e.g. "Blocked due to Bad SSL record") still count as blocked.
+
+Web Insights export layout (verified against a real export): 2 preamble lines, header on line 3, trailing comma on every row, `Event Time` like `November 2, 2026 5:50:15 AM PST` (zone abbreviation honoured), `Policy Action` carries the block reason, `Blocked Policy Type` is the blocked category (no policy-name column).
+
 ## Risks and unknowns
 1. **Formats unverified**: default NSS feed format strings and the full Web Insights header set aren't confirmed. Need one sanitized export of each from Jonathan before phase 1 is final; parsers will be header/field-map driven to absorb drift.
 2. **Conditions logs can't resolve**: time windows, device trust, user risk, user agent, cloud app, quotas, etc. are already "unknown" in the engine (`critUnmodelled`, `critTimeWindows`); logs lack group membership unless we join the directory. Results carry a confidence split (definite vs. depends-on-unknown) rather than guessing.

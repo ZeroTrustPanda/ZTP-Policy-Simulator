@@ -102,11 +102,14 @@ function simulateDiff(records, currentSnap, proposedSnap, opts = {}) {
   if (!currentSnap || !proposedSnap) throw new Error('simulateDiff needs current and proposed snapshots');
   const n = opts.top || 10;
   const out = { newlyBlocked: bucket(), newlyAllowed: bucket(), alreadyBlocked: bucket() };
+  const ssl = { transactions: 0, records: 0, hosts: new Map(), users: new Set() };
   let evaluated = 0, transactions = 0, changed = 0, logMismatch = 0;
   const cache = new Map();
   for (const r of records || []) {
     const w = Number.isFinite(r.weight) && r.weight > 0 ? r.weight : 1;
     evaluated++; transactions += w;
+    // Failed SSL/TLS handshakes: never inspected, so neither newly nor already blocked. Hosts are hints for SSL exemptions.
+    if (r.action === 'SSL_FAILED') { ssl.records++; ssl.transactions += w; inc(ssl.hosts, r.host, w); if (r.user) ssl.users.add(r.user); continue; }
     const ctx = contextOf(r, opts);
     if (!ctx.target) continue;
     const key = [ctx.target.raw || ctx.target.host, ctx.user, ctx.department, ctx.location, ctx.categories.join(','), ctx.groups.join(',')].join('|');
@@ -132,7 +135,9 @@ function simulateDiff(records, currentSnap, proposedSnap, opts = {}) {
   }
   return {
     ok: true, tz,
-    totals: { records: evaluated, transactions, changedTransactions: changed, logMismatchTransactions: logMismatch, uniqueEvaluations: cache.size },
+    totals: { records: evaluated, transactions, sslFailedTransactions: ssl.transactions, changedTransactions: changed, logMismatchTransactions: logMismatch, uniqueEvaluations: cache.size },
+    sslFailed: { status: 'sslFailed', label: 'failed SSL, not inspected', transactions: ssl.transactions, records: ssl.records, distinctUsers: ssl.users.size,
+      hosts: top(ssl.hosts, opts.sslHosts || 50), note: 'TLS handshake failed before policy applied; hosts may need an SSL inspection exemption' },
     newlyBlocked: finish(out.newlyBlocked, n), newlyAllowed: finish(out.newlyAllowed, n), alreadyBlocked: finish(out.alreadyBlocked, n),
   };
 }

@@ -14,6 +14,8 @@ function normAction(a) {
   if (!s) return null;
   // Web Insights writes the block reason as the action, e.g. "Not allowed the use of this … site",
   // "Blocked due to …", "Dropped due to failed client SSL handshake".
+  // TLS handshake failures are not policy blocks: the connection never got far enough to be inspected.
+  if (/ssl handshake|tls handshake|handshake fail/.test(s)) return 'SSL_FAILED';
   if (/^(block|not allowed|denied|deny|drop|reject|quarantin)/.test(s)) return 'BLOCKED';
   if (s.startsWith('allow')) return 'ALLOWED';
   if (s.startsWith('caution')) return 'CAUTIONED';
