@@ -1,0 +1,7 @@
+Administrator,report-owner@example.com
+Report Created,"November 2, 2026 6:00:00 PM UTC"
+No.,Event Time,User,URL,Policy Action,Cloud Application Class,Cloud Application,URL Class,URL Super Category,URL Category,Threat Category,Threat Name,Location,Department,Blocked Policy Type,Certificate Chain Validity,Server Certificate Self Signed,DLP MD5,DLP Identifier,ALPN Protocol,Unscannable Type,Forwarding Rule,Forwarding Method,Application Segment,Gateway IP,Gateway Name,
+1,"November 2, 2026 5:50:15 AM PST",user1@example.com,social.example.com/feed,Allowed,General Browsing,Example App,Business Use,Internet Communication,Social Networking,None,None,Example HQ,Dept-A,None,None,No,None,None,H/2,None,None,None,None,None,None,
+2,"November 2, 2026 5:51:00 AM PST",user2@example.com,doh.example.com/dns-query,Not allowed the use of this DNS Over HTTPS site,General Browsing,None,Productivity Loss,Information Technology,DNS Over HTTPS Services,None,None,Example HQ,Dept-B,DNS Over HTTPS Services,None,No,None,None,HTTP/1.1,None,None,None,None,None,None,
+3,"November 2, 2026 5:52:30 AM PST",user2@example.com,games.example.com/play?x=1,Dropped due to failed client SSL handshake,General Browsing,None,Bandwidth Loss,Entertainment/Recreation,Games,None,None,Example HQ,Dept-B,None,None,Yes,None,None,Unknown,None,None,None,None,None,None,
+4,"November 2, 2026 9:30:00 PM PST",user3@example.com,news.example.com/,Allowed,General Browsing,None,Business Use,News and Media,News and Media,None,None,Example HQ,Dept-C,None,None,No,None,None,H/2,None,None,None,None,None,None,

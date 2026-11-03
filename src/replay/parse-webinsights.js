@@ -6,7 +6,7 @@ const { record } = require('./normalize');
 
 const key = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const HEADERS = {
-  time: ['loggedtime', 'time', 'datetime', 'timestamp', 'eventtime'],
+  time: ['eventtime', 'loggedtime', 'time', 'datetime', 'timestamp'],
   user: ['user', 'login', 'username'],
   dept: ['department', 'dept'],
   location: ['location'],
@@ -14,7 +14,11 @@ const HEADERS = {
   host: ['host', 'hostname', 'serverhostname'],
   urlcat: ['urlcategory', 'category'],
   action: ['policyaction', 'action'],
-  ruleType: ['blockedpolicytype'],
+  // "Blocked Policy Type" holds the blocked category/class (e.g. a URL category), not the engine; kept for "already blocked by".
+  blockedPolicyType: ['blockedpolicytype'],
+  ruleType: ['ruletype', 'policytype'],
+  urlSuperCat: ['urlsupercategory'],
+  cloudApp: ['cloudapplication'],
   blockedBy: ['blockedpolicyname'],
   urlRule: ['urlfilteringpolicyname'],
   clientIp: ['clientip', 'clientinternalip'],
@@ -34,7 +38,7 @@ async function* parseWebInsights(src, stats = {}, opts = {}) {
   for await (const cells of csvRows(src)) {
     if (!map) {
       map = mapHeader(cells);
-      if (map) { stats.header = cells; stats.unknownColumns = cells.filter((_, i) => !map[i]); }
+      if (map) { stats.header = cells; stats.unknownColumns = cells.filter((c, i) => !map[i] && String(c).trim() && !/^no\.?$/i.test(String(c).trim())); }
       continue; // preamble or header line
     }
     const f = {};
