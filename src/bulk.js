@@ -158,7 +158,7 @@ function resultRow(i, row, out, cat, expected, data) {
     alsoMatched: (() => { const mm = (s.multiMatch || []).find((x) => x.decides); return mm ? mm.also.map((e) => `${e.name}${e.order != null && e.order >= 0 ? ' (order ' + e.order + ')' : ''}${e.differs ? ' [' + e.action + ']' : ''}`).join('; ') : ''; })(),
     incomplete: (s.incomplete || []).map((x) => `${x.module}${x.timeout ? ' — ZIA timed out' : ''}: ${String(x.error).slice(0, 80)}`).join(' | '),
     couldBlock: blk ? `${blk.condition} → rule "${blk.rule || blk.module}"` : '',
-    conditions: (s.alsoBasedOn || []).length,
+    conditions: (s.alsoBasedOn || []).map((c) => `${c.condition} → ${c.action}${c.rule ? ` ("${c.rule}")` : ''}`).join('; '),
     notes: notes.slice(0, 3).join(' | '), error: '',
   };
   return Object.assign(r, R.recommendRow(r, expected, data || {}));
@@ -302,4 +302,4 @@ function status(job, { full = false } = {}) {
   };
 }
 
-module.exports = { parseCsv, expand, lookupKey, fromLookup, toCsv, runJob, status, summarizeJob, COLUMNS, MAX_ROWS, MAX_PER_ENTRY };
+module.exports = { resultRow, parseCsv, expand, lookupKey, fromLookup, toCsv, runJob, status, summarizeJob, COLUMNS, MAX_ROWS, MAX_PER_ENTRY };

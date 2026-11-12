@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.8.6 — 2026-11-12
+- Rule labels are not conditions (every labelled rule was "unknown"); tenant default rule decides when nothing else matches; a matched block rule decides even if an earlier rule might apply; bulk conditions column spelled out.
+
 ## 1.8.5 — 2026-10-29
 - App service groups (Office 365 / UCaaS One Click) evaluated by domain and published IP ranges; generic guard makes any unevaluated rule condition "unknown"; cloud apps, REDIR_ZPA, resolved-IP and file-type categories evaluated.
 - No caching: lookups re-queried per simulation, fresh bulk runs, no-store responses, stale result cleared.

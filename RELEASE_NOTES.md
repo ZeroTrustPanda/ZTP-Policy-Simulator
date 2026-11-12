@@ -1,4 +1,4 @@
-# ZeroTrustPanda ZS Policy Simulator v1.8.5
+# ZeroTrustPanda ZS Policy Simulator v1.8.6
 
 **Would this be allowed, blocked or bypassed — and by what?** A standalone simulator that pulls your live Zscaler policy over OneAPI and evaluates a transaction across ZIA, ZPA, Client Connector and Cloud & Branch Connector the way the cloud would, in rule order, then shows the deciding rule and everything else that could change the outcome.
 
@@ -7,12 +7,12 @@ Companion to the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustP
 ## Downloads
 | Platform | File |
 |---|---|
-| Windows x64 | [ZTP-Policy-Simulator-1.8.5-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.5/ZTP-Policy-Simulator-1.8.5-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
-| macOS Apple Silicon | [ZTP-Policy-Simulator-1.8.5-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.5/ZTP-Policy-Simulator-1.8.5-macos-arm64.zip) |
-| macOS Intel | [ZTP-Policy-Simulator-1.8.5-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.5/ZTP-Policy-Simulator-1.8.5-macos-x64.zip) |
+| Windows x64 | [ZTP-Policy-Simulator-1.8.6-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.6/ZTP-Policy-Simulator-1.8.6-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
+| macOS Apple Silicon | [ZTP-Policy-Simulator-1.8.6-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.6/ZTP-Policy-Simulator-1.8.6-macos-arm64.zip) |
+| macOS Intel | [ZTP-Policy-Simulator-1.8.6-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.6/ZTP-Policy-Simulator-1.8.6-macos-x64.zip) |
 | Source | clone the repo, or GitHub's "Source code" download on the release |
 
-Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.5/SHA256SUMS.txt)
+Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.6/SHA256SUMS.txt)
 
 No install, no Node.js required. Run it and it opens `http://127.0.0.1:8787`.
 macOS builds are unsigned — before first run: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`.
@@ -110,6 +110,13 @@ Port from the URL scheme (hostnames assume HTTPS/443) · network service and app
 - Cloud & Branch Connector support follows Zscaler's API reference and SDK; it was tested against sample policies, not yet a live connector tenant. When a workload group has several tag sets joined by different AND/OR operators, check one against the console.
 - No per-transaction log lookup: the console's transaction-log endpoints refuse API-client tokens. Use the console's Web / Firewall Insights logs for per-transaction proof.
 - ZCC field names follow the shapes verified by the Policy Wizard; report any app profile that shows "no forwarding profile linked".
+
+## Changes in 1.8.6
+Customer-reported fix: a bulk run on TCP/53 showed every IP as **Allowed** with the deciding-rule columns blank, even though a "SIRT Block" rule covered many of the IPs and a "Recommended Firewall Rule" allows DNS.
+- **Rule labels are no longer treated as conditions.** Labels such as "Blocks" or "Any - Any" are tags for organising rules in the portal and never decide whether traffic matches. The simulator listed them as a condition it couldn't check, which turned every labelled rule into "unknown". In a tenant where every rule has a label, nothing could match.
+- **The tenant's default rule decides when nothing else matches.** For example, "Default Firewall Filtering Rule" → Block/Drop. Before, the simulator fell back to a built-in Allow with no rule named.
+- **A matched block rule decides even when an earlier rule *might* apply.** The result is Blocked by that rule, and the earlier rule is listed under *Policy action also based on* (e.g. "if the IP is in Office 365 → Allow"). Before, this case came out as Allowed with no rule.
+- **Bulk CSV:** *Conditions that change the result* now spells out each condition, its action and the rule, instead of showing only a count.
 
 ## Changes in 1.8.5
 Customer-reported fixes:

@@ -1,0 +1,21 @@
+{ "tool": "ztp-policy-simulator", "tenant": "Customer repro (from the policy PDF)", "errors": {},
+  "data": {
+    "advancedSettings": { "enableAdminRankAccess": true },
+    "networkServices": [
+      { "id": 1, "name": "DNS", "tag": "DNS", "destTcpPorts": [{ "start": 53, "end": 53 }], "destUdpPorts": [{ "start": 53, "end": 53 }] },
+      { "id": 2, "name": "HTTP", "tag": "HTTP", "destTcpPorts": [{ "start": 80, "end": 80 }] },
+      { "id": 3, "name": "HTTPS", "tag": "HTTPS", "destTcpPorts": [{ "start": 443, "end": 443 }] },
+      { "id": 4, "name": "NTP", "tag": "NTP", "destUdpPorts": [{ "start": 123, "end": 123 }] },
+      { "id": 5, "name": "ICMP", "tag": "ICMP_ANY" }
+    ],
+    "firewallRules": [
+      { "id": 101, "name": "Block malicious IPs and domains", "order": 1, "rank": 0, "state": "ENABLED", "action": "BLOCK_DROP", "destIpCategories": ["MALICIOUS_CONTENT"], "labels": [{ "id": 1, "name": "Blocks" }] },
+      { "id": 103, "name": "Office 365 One Click Rule", "order": 3, "rank": 0, "state": "ENABLED", "action": "ALLOW", "predefined": true, "appServiceGroups": [{ "id": 1, "name": "OFFICE365" }] },
+      { "id": 106, "name": "SIRT Block", "order": 6, "rank": 7, "state": "ENABLED", "action": "BLOCK_DROP", "description": "12/30/21 initial rule, dwg",
+        "destAddresses": ["172.98.63.0/24", "107.173.164.0/24", "45.150.16.0/24", "1.54.187.0/24", "2.59.60.0/24", "46.3.0.0/16"], "labels": [{ "id": 1, "name": "Blocks" }] },
+      { "id": 109, "name": "Geolocation Block List", "order": 9, "rank": 7, "state": "ENABLED", "action": "BLOCK_DROP", "destCountries": ["COUNTRY_AF", "COUNTRY_BA", "COUNTRY_BG", "COUNTRY_CN", "COUNTRY_RU"], "labels": [{ "id": 1, "name": "Blocks" }] },
+      { "id": 110, "name": "Recommended Firewall Rule", "order": 10, "rank": 7, "state": "ENABLED", "action": "ALLOW", "nwServices": [{ "id": 1, "name": "DNS" }, { "id": 2, "name": "HTTP" }, { "id": 3, "name": "HTTPS" }, { "id": 4, "name": "NTP" }], "labels": [{ "id": 2, "name": "Any - Any" }] },
+      { "id": 111, "name": "ICMP", "order": 11, "rank": 7, "state": "ENABLED", "action": "ALLOW", "nwServices": [{ "id": 5, "name": "ICMP" }], "labels": [{ "id": 2, "name": "Any - Any" }] },
+      { "id": 199, "name": "Default Firewall Filtering Rule", "order": -1, "rank": 7, "state": "ENABLED", "action": "BLOCK_DROP", "defaultRule": true, "labels": [{ "id": 1, "name": "Blocks" }] }
+    ]
+  } }

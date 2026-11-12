@@ -355,7 +355,8 @@ function critTimeWindows(rule) {
 }
 
 // Criteria that exist on some rules but are not modelled; flagged unknown rather than silently ignored.
-const UNMODELLED = ['userAgentTypes', 'deviceTrustLevels', 'userRiskScoreLevels', 'deviceGroups', 'devices', 'labels', 'sourceCountries', 'cloudApplications', 'platforms', 'timeQuota', 'sizeQuota'];
+// Rule labels are only tags for organising rules in the admin portal: they never decide whether traffic matches.
+const UNMODELLED = ['userAgentTypes', 'deviceTrustLevels', 'userRiskScoreLevels', 'deviceGroups', 'devices', 'sourceCountries', 'cloudApplications', 'platforms', 'timeQuota', 'sizeQuota'];
 const UNMODELLED_LABEL = { userAgentTypes: 'User agent', deviceTrustLevels: 'Device trust', userRiskScoreLevels: 'User risk score', deviceGroups: 'Device group', devices: 'Device', labels: 'Rule label', workloadGroups: 'Workload group', sourceCountries: 'Source country', cloudApplications: 'Cloud app', platforms: 'Platform', timeQuota: 'Time quota', sizeQuota: 'Size quota' };
 // Cloud applications on a rule (e.g. SSL "UCaaS One Click" → ZOOM, WEBEX, …): matched against the cloud app Zscaler's
 // URL lookup returned for the destination. With no lookup the condition is unknown; never "any".
@@ -484,7 +485,11 @@ function withGuard(r, buildCrits) {
 function runModule(module, rules, buildCrits, { blockRe, allowRe, defaultVerdict = 'ALLOW', defaultReason = 'no matching rule (default action)', skipNote, ranked = false } = {}) {
   const sorted = sortRules(rules, ranked).filter((r) => lc(r.state) !== 'disabled');
   const evaluated = sorted.map((r) => Object.assign(evalRule(r, withGuard(r, buildCrits)), isDefaultRule(r) ? { _default: true } : {}));
-  const decidingIdx = evaluated.findIndex((e) => e.status === 'match');
+  let decidingIdx = evaluated.findIndex((e) => e.status === 'match');
+  // Nothing matched definitely: the tenant's own default rule (e.g. "Default Firewall Filtering Rule" → Block/Drop)
+  // applies, never a hard-coded Allow.
+  let viaDefault = false;
+  if (decidingIdx < 0) { const di = evaluated.findIndex((e) => e._default); if (di >= 0) { decidingIdx = di; viaDefault = evaluated[di].status !== 'match'; } }
   const preempt = evaluated.slice(0, decidingIdx < 0 ? evaluated.length : decidingIdx).filter((e) => e.status === 'unknown');
   const deciding = decidingIdx >= 0 ? evaluated[decidingIdx] : null;
   const verdictOf = (a) => (a == null ? 'UNKNOWN' : /ISOLATE/i.test(a) ? 'ISOLATE' : /CAUTION/i.test(a) ? 'CAUTION' : blockRe && blockRe.test(a) ? 'BLOCK' : allowRe && allowRe.test(a) ? 'ALLOW' : a);
@@ -492,7 +497,7 @@ function runModule(module, rules, buildCrits, { blockRe, allowRe, defaultVerdict
   let confidence = 'definite';
   // Only unresolved earlier rules whose action would change the outcome matter.
   const changers = preempt.filter((e) => verdictOf(e.action) !== verdict);
-  if (changers.length) confidence = 'conditional';
+  if (changers.length || viaDefault) confidence = 'conditional';
   const sameOutcome = preempt.filter((e) => verdictOf(e.action) === verdict);
   const mm = multiMatch(evaluated, deciding, (e) => verdictOf(e.action));
   return {
@@ -500,7 +505,7 @@ function runModule(module, rules, buildCrits, { blockRe, allowRe, defaultVerdict
     rankOrdered: ranked, rankEffects: ranked ? rankEffects(evaluated, deciding) : [],
     module, verdict, confidence,
     decidingRule: deciding, couldOverride: changers, sameOutcomeEarlier: sameOutcome,
-    reason: deciding ? `Rule "${deciding.name}" (order ${deciding.order}${ranked ? `, admin rank ${rankOf(deciding)}` : ''}) matched` : defaultReason,
+    reason: deciding ? (deciding._default ? `No other rule matched, so the default rule "${deciding.name}" (${deciding.action}) applies` : `Rule "${deciding.name}" (order ${deciding.order}${ranked ? `, admin rank ${rankOf(deciding)}` : ''}) matched`) : defaultReason,
     considered: evaluated.length, rules: evaluated, note: skipNote,
   };
 }
@@ -1291,7 +1296,7 @@ function summarize(modules, ctx = {}) {
     if (zpa.onNet) alsoBasedOn.push({ kind: 'zpa', condition: `On a trusted (on-net) network: segment "${zpa.onNet.segment}" bypasses ZPA`, action: 'BYPASS', module: 'ZPA segment', rule: null, detail: 'Then it is handled as internet traffic (Client Connector / ZIA)' });
   } else {
     const pipeline = modules.filter((m) => !m.module.startsWith('Forwarding') && m.module !== 'ZPA Access Policy' && !['N/A', 'NOT_EVALUATED'].includes(m.verdict));
-    const finalIdx = pipeline.findIndex((m) => ['BLOCK', 'ISOLATE', 'CAUTION'].includes(m.verdict) && m.confidence === 'definite' && !(m.module === 'Data Loss Prevention'));
+    const finalIdx = pipeline.findIndex((m) => ['BLOCK', 'ISOLATE', 'CAUTION'].includes(m.verdict) && (m.confidence === 'definite' || !!m.decidingRule) && !(m.module === 'Data Loss Prevention'));
     const upto = finalIdx >= 0 ? pipeline.slice(0, finalIdx + 1) : pipeline;
     if (finalIdx >= 0) { const m = pipeline[finalIdx]; zia = pick(m, m.verdict); lines.push(`${m.verdict === 'BLOCK' ? 'Blocked' : m.verdict === 'ISOLATE' ? 'Isolated' : 'Cautioned'} by ${label(m)}`); }
     else {
