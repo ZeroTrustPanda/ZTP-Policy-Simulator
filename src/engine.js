@@ -112,13 +112,13 @@ function critSourceIp(rule, ctx, snap) {
 // Destination: addresses (ip/cidr/range/fqdn), ip groups, ip categories, countries (OR'd together).
 function critDest(rule, ctx, snap) {
   const addrs = [...arr(rule.destAddresses)];
-  const groupNames = [], emptyGroups = [];
+  const groupNames = [], emptyGroups = [], missingGroups = [];
   const gCats = [], gCountries = [];
   for (const g of arr(rule.destIpGroups)) {
     const full = (snap.ipDestinationGroups || []).find((x) => String(x.id) === String(g.id));
     const name = g.name || (full && full.name) || g.id;
     groupNames.push(name);
-    if (!full) continue;
+    if (!full) { missingGroups.push(name); continue; }
     const a = [...arr(full.addresses), ...arr(full.ipAddresses)];
     addrs.push(...a);
     gCats.push(...arr(full.ipCategories), ...arr(full.urlCategories)); gCountries.push(...arr(full.countries));
@@ -127,6 +127,8 @@ function critDest(rule, ctx, snap) {
   const cats = nonAny([...arr(rule.destIpCategories), ...gCats].map((c) => (c && c.name) || c));
   const countries = nonAny([...arr(rule.destCountries), ...gCountries]);
   if (!addrs.length && !cats.length && !countries.length) {
+    // A group the snapshot doesn't contain (fetch failed or trimmed) is a restriction we can't see — never "not restricted".
+    if (missingGroups.length && !emptyGroups.length) return { field: 'destination', status: 'unknown', scope: `Destination group ${missingGroups.join(', ')}`, detail: `destination group ${missingGroups.join(', ')} isn't in the policy snapshot — can't check membership` };
     if (!emptyGroups.length) return { field: 'destination', status: 'any', detail: 'not restricted' };
     // A group the API returns with no entries (e.g. the auto-created "ZPA Brokers" group, type DSTN_OTHER): its
     // members are managed by Zscaler. ZPA brokers are *.zpath.net / *.private.zscaler.com.

@@ -41,3 +41,12 @@ test('bulk CSV shows the deciding rule and spells out the conditions', () => {
   assert.match(bulk.toCsv([row]), /Recommended Firewall Rule/);
   assert.match(String(row.conditions), /Geolocation Block List/);
 });
+
+test('a destination IP group missing from the snapshot is unknown, not "any destination"', () => {
+  const s = JSON.parse(JSON.stringify(snap));
+  s.data.firewallRules.splice(1, 0, { id: 150, name: 'VOIP group allow', order: 2, rank: 0, state: 'ENABLED', action: 'ALLOW', destIpGroups: [{ id: 77, name: 'VOIP Applications' }] });
+  const r = simulate(s, { target: M.parseTarget('1.54.187.242'), port: 53, protocol: 'tcp', groups: [], categories: ['MISCELLANEOUS_OR_UNKNOWN'], categorySource: 'Zscaler lookup', resolvedIps: [], notes: [] }, {});
+  const e = fw(r).rules.find((x) => x.name === 'VOIP group allow');
+  assert.equal(e.criteria.find((c) => c.field === 'destination').status, 'unknown');
+  assert.equal(fw(r).decidingRule.name, 'SIRT Block');
+});

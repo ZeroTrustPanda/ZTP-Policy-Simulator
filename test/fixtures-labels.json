@@ -9,7 +9,7 @@
       { "id": 5, "name": "ICMP", "tag": "ICMP_ANY" }
     ],
     "firewallRules": [
-      { "id": 101, "name": "Block malicious IPs and domains", "order": 1, "rank": 0, "state": "ENABLED", "action": "BLOCK_DROP", "destIpCategories": ["MALICIOUS_CONTENT"], "labels": [{ "id": 1, "name": "Blocks" }] },
+      { "id": 101, "name": "Block malicious IPs and domains", "order": 1, "rank": 0, "state": "ENABLED", "action": "BLOCK_DROP", "destIpCategories": ["MALWARE_SITE"], "labels": [{ "id": 1, "name": "Blocks" }] },
       { "id": 103, "name": "Office 365 One Click Rule", "order": 3, "rank": 0, "state": "ENABLED", "action": "ALLOW", "predefined": true, "appServiceGroups": [{ "id": 1, "name": "OFFICE365" }] },
       { "id": 106, "name": "SIRT Block", "order": 6, "rank": 7, "state": "ENABLED", "action": "BLOCK_DROP", "description": "12/30/21 initial rule, dwg",
         "destAddresses": ["172.98.63.0/24", "107.173.164.0/24", "45.150.16.0/24", "1.54.187.0/24", "2.59.60.0/24", "46.3.0.0/16"], "labels": [{ "id": 1, "name": "Blocks" }] },
