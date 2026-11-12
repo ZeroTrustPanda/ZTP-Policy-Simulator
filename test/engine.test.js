@@ -17,9 +17,16 @@ test('domain wildcard relations', () => {
   assert.equal(M.domainRelation('www.google.com', '.google.com'), 'match');
   assert.equal(M.domainRelation('google.com', '*.google.com'), 'match');
   assert.equal(M.domainRelation('notgoogle.com', 'google.com'), 'none');
-  assert.equal(M.domainRelation('*.google.com', 'google.com'), 'match');
+  assert.equal(M.domainRelation('*.google.com', 'google.com'), 'partial'); // apex-only entry inside the queried domain
+  assert.equal(M.domainRelation('*.google.com', '.google.com'), 'match');
+  // ZIA URL format: no leading dot = that host only; leading dot = host and subdomains
+  assert.equal(M.domainRelation('www.google.com', 'google.com'), 'none');
+  assert.equal(M.domainRelation('google.com', 'google.com'), 'match');
+  assert.equal(M.domainRelation('google.com', '.google.com'), 'match');
   assert.equal(M.domainRelation('*.google.com', 'mail.google.com'), 'partial');
-  assert.equal(M.domainRelation('https://a.example.com/x/y', 'example.com/x'), 'match');
+  assert.equal(M.domainRelation('https://a.example.com/x/y', '.example.com/x'), 'match');
+  assert.equal(M.domainRelation('https://a.example.com/x/y', 'example.com/x'), 'none');
+  assert.equal(M.domainRelation('https://example.com/x/y', 'example.com/x'), 'match');
   assert.equal(M.domainRelation('https://a.example.com/z', 'example.com/x'), 'none');
 });
 
@@ -84,7 +91,9 @@ test('DNS wildcard query', () => {
 test('file type: download exe -> file type control + sandbox', () => {
   const r = run({ target: 'https://downloads.example/setup.exe', fileType: 'EXE', operation: 'DOWNLOAD', categories: ['OTHER_BUSINESS_AND_ECONOMY'] });
   assert.equal(mod(r, 'File Type').verdict, 'BLOCK');
-  assert.equal(mod(r, 'Sandbox').verdict, 'BLOCK');
+  // A sandbox rule's BLOCK applies only to files the sandbox finds malicious; an unseen file gets the first-time action.
+  assert.equal(mod(r, 'Sandbox').verdict, 'SCAN');
+  assert.equal(mod(r, 'Sandbox').ifMalicious, 'BLOCK');
   const doc = run({ target: 'https://x.example/a.docx', fileType: 'DOCX', operation: 'DOWNLOAD' });
   assert.equal(mod(doc, 'File Type').verdict, 'ALLOW');
 });
@@ -326,11 +335,11 @@ test('ZPA toggle off: ZPA not evaluated', () => {
   assert.notEqual(out.summary.primary.module, 'ZPA Access Policy');
 });
 
-test('ZIA order: ATP is evaluated before Firewall, Cloud App Control after URL Filtering', () => {
+test('ZIA order: ATP is evaluated before Firewall, Cloud App Control before URL Filtering', () => {
   const out = sim15(demo15(), 'files.example.org', { categories: ['MALWARE_SITE'] });
   const names = out.modules.map((m) => m.module);
   assert.ok(names.indexOf('Advanced Threat Protection') < names.indexOf('Firewall'));
-  assert.ok(names.indexOf('URL Filtering') < names.indexOf('Cloud App Control'));
+  assert.ok(names.indexOf('Cloud App Control') < names.indexOf('URL Filtering'));
   assert.ok(names.indexOf('Cloud App Control') < names.indexOf('Sandbox (Behavioral Analysis)'));
   assert.ok(names.indexOf('Sandbox (Behavioral Analysis)') < names.indexOf('File Type Control'));
   assert.equal(out.summary.primary.module, 'Advanced Threat Protection');

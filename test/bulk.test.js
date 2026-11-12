@@ -156,3 +156,20 @@ test('lookup result keeps the cloud application when Zscaler returns one', () =>
   assert.equal(bulk.fromLookup({ url: 'x', urlClassifications: ['A'], application: 'DROPBOX' }).application, 'DROPBOX');
   assert.equal(bulk.fromLookup({ url: 'x', urlClassifications: ['A'], application: 'NONE' }).application, '');
 });
+
+test('bulk: hostnames resolved once each, in parallel, before simulating; lookup source reaches the simulation', async () => {
+  const resolvedCalls = [];
+  const resolve4 = async (h) => { resolvedCalls.push(h); if (h === 'nx.example') throw new Error('ENOTFOUND'); return ['93.184.216.34']; };
+  const seen = [];
+  const ctxFor2 = async (s, b) => { seen.push({ t: b.target, ips: b.resolvedIps, src: b.categorySource }); return { target: M.parseTarget(b.target), port: b.port ? +b.port : null, protocol: b.protocol, categories: b.categories || [], categorySource: b.categorySource, resolvedIps: b.resolvedIps || [], groups: [], notes: [] }; };
+  const lookup = async (c, urls) => urls.map((u) => ({ url: u, urlClassifications: ['NEWS_AND_MEDIA'] }));
+  const session = { snap: { data: require('../src/demo-snapshot.json') }, client: {}, last: 0 };
+  const rows = bulk.expand(bulk.parseCsv('www.example.com\nwww.example.com\nnx.example\n8.8.8.8\n').entries).rows;
+  const job = { id: 'r', phase: 'queued', total: rows.length, done: 0, results: [], started: Date.now(), touch() {} };
+  await bulk.runJob(session, job, rows, { lookup: true }, { buildContext: ctxFor2, simulate, urlLookup: lookup, URL_LOOKUP_MAX: 10, resolve4 });
+  assert.equal(job.phase, 'done');
+  assert.deepEqual(resolvedCalls.sort(), ['nx.example', 'www.example.com']); // once per hostname, IPs not resolved
+  assert.deepEqual(seen.find((x) => x.t === 'www.example.com').ips, ['93.184.216.34']);
+  assert.deepEqual(seen.find((x) => x.t === 'nx.example').ips, []);
+  assert.equal(seen.find((x) => x.t === 'www.example.com').src, 'Zscaler lookup');
+});

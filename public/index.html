@@ -809,7 +809,7 @@ document.querySelectorAll('#singlePanel input[type=text]').forEach((el) => el.ad
 // ---------- step 3: results ----------
 const VERDICT = { BLOCKED: ['⛔', 'BLOCKED'], ALLOWED: ['✅', 'ALLOWED'], BYPASSED: ['↪️', 'BYPASSED'], CONDITIONAL: ['❔', 'DEPENDS ON CONTEXT'] };
 function badgeFor(x) {
-  const m = { BLOCK: 'b-red', CONDITIONAL_BLOCK: 'b-red', ALLOW: 'b-green', DECRYPTED: 'b-green', VIA_ZSCALER: 'b-green', INSPECT_ONLY: 'b-blue', DEFAULT: 'b-slate', NOT_DECRYPTED: 'b-amber', BYPASSES_ZSCALER: 'b-slate', BYPASS: 'b-slate', DEPENDS_ON_PROFILE: 'b-purple', 'N/A': 'b-slate', NOT_A_ZPA_APP: 'b-slate' };
+  const m = { BLOCK: 'b-red', CONDITIONAL_BLOCK: 'b-red', ALLOW: 'b-green', DECRYPTED: 'b-green', VIA_ZSCALER: 'b-green', INSPECT_ONLY: 'b-blue', DEFAULT: 'b-slate', NOT_DECRYPTED: 'b-amber', BYPASSES_ZSCALER: 'b-slate', BYPASS: 'b-slate', DEPENDS_ON_PROFILE: 'b-purple', 'N/A': 'b-slate', NOT_A_ZPA_APP: 'b-slate', SCAN: 'b-blue', QUARANTINE: 'b-amber', CAUTION: 'b-amber', ISOLATE: 'b-purple' };
   const k = String(x || '');
   const cls = m[k] || (/BLOCK|DROP|RESET|DENY/.test(k) ? 'b-red' : /ALLOW/.test(k) ? 'b-green' : 'b-slate');
   return `<span class="badge ${cls}">${esc(k.replace(/_/g, ' '))}</span>`;
@@ -1128,7 +1128,7 @@ try { const m = localStorage.getItem('ztp-sim.mode'); if (m) setMode(m); } catch
 
 // ---------- bulk ----------
 let bulkText = null, bulkName = '', bulkTimer = null;
-const RUNNING = ['queued', 'lookup', 'simulate'];
+const RUNNING = ['queued', 'lookup', 'resolve', 'simulate'];
 const RES = { BLOCKED: ['⛔', 'Blocked'], ALLOWED: ['✅', 'Allowed'], BYPASSED: ['↪', 'Bypassed'], ISOLATED: ['🧪', 'Isolated'], CAUTIONED: ['⚠️', 'Caution'] };
 const num = (n) => (n || 0).toLocaleString();
 function fmtSecs(n) { n = Math.max(0, Math.round(n)); return n >= 3600 ? `${Math.floor(n / 3600)}h ${Math.round((n % 3600) / 60)}m` : n >= 60 ? `${Math.floor(n / 60)}m ${n % 60}s` : `${n}s`; }
@@ -1197,7 +1197,7 @@ function renderBulk(j) {
     pct = L.total ? (L.done / L.total) * 100 : 0;
     phase = wait > 0 ? `Paused · ${esc(L.waitReason || "Zscaler's lookup rate limit")} · resuming in ${fmtSecs(wait)} · ${num(L.done)} of ${num(L.total)} looked up`
       : `Looking up Zscaler categories · ${num(L.done)} of ${num(L.total)}`;
-  } else if (running) { pct = j.total ? (j.done / j.total) * 100 : 0; phase = `Simulating against the loaded policy · ${num(j.done)} of ${num(j.total)}`; }
+  } else if (j.phase === 'resolve') { phase = 'Resolving hostnames (DNS)…'; } else if (running) { pct = j.total ? (j.done / j.total) * 100 : 0; phase = `Simulating against the loaded policy · ${num(j.done)} of ${num(j.total)}`; }
   else if (j.phase === 'done') { pct = 100; phase = `Finished · ${num(j.total)} rows in ${fmtSecs((j.finished - j.started) / 1000)}`; }
   else if (j.phase === 'cancelled') { pct = j.total ? (j.done / j.total) * 100 : 0; phase = `Cancelled after ${num(j.done)} of ${num(j.total)} rows · results so far can be downloaded`; }
   else phase = `<span class="err">Bulk test failed: ${esc(j.error)}</span>`;

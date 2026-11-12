@@ -25,7 +25,7 @@ app.use(express.json({ limit: '50mb' }));
 app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store, no-cache, must-revalidate'); res.set('Pragma', 'no-cache'); next(); });
 app.use(express.static(path.join(__dirname, 'public')));
 
-setInterval(() => { const now = Date.now(); for (const [k, v] of sessions) if (now - v.last > SESSION_TTL && !(v.bulk && ['lookup', 'simulate', 'queued'].includes(v.bulk.phase))) sessions.delete(k); }, 60000).unref();
+setInterval(() => { const now = Date.now(); for (const [k, v] of sessions) if (now - v.last > SESSION_TTL && !(v.bulk && ['lookup', 'resolve', 'simulate', 'queued'].includes(v.bulk.phase))) sessions.delete(k); }, 60000).unref();
 
 function getSession(req, res) {
   const id = (req.body && req.body.sessionId) || req.query.sessionId;
@@ -162,10 +162,11 @@ async function buildContext(s, b) {
     else if (!t.isIp) ctx.resolvedIps.push(b.ip);
   }
   const tg = ctx.target;
-  if (tg && !tg.isIp && !tg.isWildcard && !b.ip) {
+  if (Array.isArray(b.resolvedIps)) { if (tg && !tg.isIp) ctx.resolvedIps = b.resolvedIps.slice(0, 8); } // pre-resolved (bulk)
+  else if (tg && !tg.isIp && !tg.isWildcard && !b.ip) {
     try { ctx.resolvedIps = (await dns.resolve4(tg.host)).slice(0, 8); } catch { ctx.notes.push(`DNS resolution of ${tg.host} failed locally; IP-based rules may show as unknown.`); }
   }
-  if (b.categories && b.categories.length) { ctx.categories = b.categories; ctx.categorySource = b.noLookup ? 'precomputed' : 'entered'; }
+  if (b.categories && b.categories.length) { ctx.categories = b.categories; ctx.categorySource = b.categorySource || (b.noLookup ? 'precomputed' : 'entered'); }
   else if (tg && !b.noLookup && !s.demo && s.client) {
     // Zscaler classification for the destination: hostnames and single IPs (not CIDRs/ranges). Looked up fresh for
     // every simulation (the cache is flushed at the start of each /api/simulate).
@@ -390,7 +391,7 @@ app.post('/api/health', wrap(async (req, res) => {
 app.post('/api/bulk/start', wrap(async (req, res) => {
   const s = getSession(req, res); if (!s) return;
   if (!s.snap) return res.status(409).json({ error: 'Policies are not loaded yet. Click "Load policies" first.' });
-  if (s.bulk && ['lookup', 'simulate', 'queued'].includes(s.bulk.phase)) return res.status(409).json({ error: 'A bulk test is already running. Cancel it or wait for it to finish.' });
+  if (s.bulk && ['lookup', 'resolve', 'simulate', 'queued'].includes(s.bulk.phase)) return res.status(409).json({ error: 'A bulk test is already running. Cancel it or wait for it to finish.' });
   const b = req.body || {};
   const parsed = bulk.parseCsv(b.csv || '');
   if (!parsed.entries.length) return res.status(400).json({ error: 'No destinations found. Put one IP, CIDR, range or host per line, or use a header row with an "ip" column.', skipped: parsed.skipped.slice(0, 20) });
@@ -405,7 +406,7 @@ app.post('/api/bulk/start', wrap(async (req, res) => {
     touch: () => { s.last = Date.now(); }, expectation: opts.expected,
   };
   s.bulk = job;
-  bulk.runJob(s, job, ex.rows, opts, { buildContext, simulate, urlLookup, URL_LOOKUP_MAX });
+  bulk.runJob(s, job, ex.rows, opts, { buildContext, simulate, urlLookup, URL_LOOKUP_MAX, resolve4: s.demo ? null : (h) => dns.resolve4(h) });
   console.log(`[bulk] ${job.total} rows (lookup ${opts.lookup ? 'on' : 'off'})`);
   res.json(bulk.status(job));
 }));
@@ -506,7 +507,7 @@ app.post('/api/changes/context', (req, res) => {
     .map((r) => ({ id: r.id, name: r.name, order: r.order, action: r.action, state: r.state, cats: [...ids(r.urlCategories), ...ids(r.destIpCategories), ...ids(r.resCategories)], groups: ids(r.destIpGroups) }));
   res.json({
     tenant: tenantOf(s), mock: !!s.demo, writeEnabled: !!s.writeEnabled, errors: s.snap.errors,
-    categories: arr(d.customUrlCategories).map((c) => ({ id: c.id, name: c.configuredName || c.id, count: arr(c.urls).length + arr(c.ipRanges).length })),
+    categories: arr(d.customUrlCategories).filter((c) => c.customCategory !== false).map((c) => ({ id: c.id, name: c.configuredName || c.id, count: arr(c.urls).length + arr(c.ipRanges).length })),
     groups: arr(d.ipDestinationGroups).map((g) => ({ id: g.id, name: g.name, type: g.type || 'DSTN_IP', count: arr(g.addresses).length })),
     rules: { url: rules('urlFilteringRules'), firewall: rules('firewallRules'), dns: rules('dnsRules') },
     locations: arr(d.locations).map((l) => ({ id: l.id, name: l.name })),

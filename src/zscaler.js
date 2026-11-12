@@ -84,6 +84,15 @@ class ZClient {
     const key = audience || '';
     const t = this.tokens[key];
     if (!force && t && Date.now() < t.exp - 60000) return t.token;
+    // Parallel callers share one token request instead of each fetching their own.
+    this._authing = this._authing || {};
+    if (!force && this._authing[key]) return this._authing[key];
+    const p = this._fetchToken(audience, key);
+    this._authing[key] = p;
+    try { return await p; } finally { if (this._authing[key] === p) delete this._authing[key]; }
+  }
+
+  async _fetchToken(audience, key) {
     const { clientId, clientSecret } = this.cfg;
     if (!this.cfg.vanityDomain || !clientId || !clientSecret) throw new Error('Vanity domain, client ID and client secret are required');
     const form = { grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret };
@@ -108,11 +117,17 @@ class ZClient {
 
   async request(method, path, { query, body, audience, headers: extra, rateRetries = 5 } = {}, attempt = 0) {
     if (audience === undefined && path.startsWith('/zins')) audience = ZINS_AUDIENCE;
-    // ZIA OneAPI allows roughly 1-2 req/s per endpoint family; space calls like the wizard does.
-    const gap = Date.now() - this.lastCall;
-    if (gap < 600) await new Promise((r) => setTimeout(r, 600 - gap));
+    // Each product has its own rate limits, so calls are spaced per product (ZIA allows roughly 1-2 req/s; the others
+    // are more generous). Products can then load in parallel without one slowing the others down.
+    const token = await this.auth(false, audience || null); // before taking a slot, so a token fetch can't squeeze the spacing
+    const fam = familyOf(path);
+    this.lastCalls = this.lastCalls || {};
+    const gaps = Object.assign({}, FAMILY_GAP, this.cfg.rateGaps || {});
+    const minGap = gaps[fam] == null ? 600 : gaps[fam];
+    const slot = Math.max(Date.now(), (this.lastCalls[fam] || 0) + minGap);
+    this.lastCalls[fam] = slot; // reserve the slot before waiting, so parallel callers queue behind it
+    if (slot > Date.now()) await new Promise((r) => setTimeout(r, slot - Date.now()));
     this.lastCall = Date.now();
-    const token = await this.auth(false, audience || null);
     let p = path;
     if (query) p += (p.includes('?') ? '&' : '?') + new URLSearchParams(query).toString();
     const h = Object.assign({ Authorization: `Bearer ${token}`, Accept: 'application/json', 'Cache-Control': 'no-cache' }, extra || {});
@@ -141,6 +156,10 @@ class ZClient {
   del(path, query) { return this.request('DELETE', path, { query }); }
 }
 
+// Rate-limit family of an API path, and the minimum spacing (ms) between calls in that family.
+function familyOf(path) { const m = String(path).match(/^\/(zia|zcc|zpa|ztw|ziam|zins|private)\b/); return m ? m[1] : 'zia'; }
+const FAMILY_GAP = { zia: 600, private: 600, zins: 600, zcc: 600, ztw: 400, zpa: 150, ziam: 200 };
+
 function hintFor(status, path) {
   const prod = path.startsWith('/zcc') ? 'Client Connector' : path.startsWith('/zpa') ? 'ZPA' : path.startsWith('/ztw') ? 'Cloud & Branch Connector' : path.startsWith('/zins') ? 'Z-Insights' : path.startsWith('/private') ? 'ZIA logs' : 'ZIA';
   if (status === 401) return prod === 'Z-Insights' ? ' — rejected with both token types; in ZIdentity give this API client the Z-Insights (Analytics) API resource/role' : ` — token rejected; the API client may lack ${prod} scope in ZIdentity`;
@@ -168,7 +187,10 @@ const ENDPOINTS = [
   { key: 'atpSettings', group: 'zia', label: 'ATP settings', path: `${ZIA}/cyberThreatProtection/advancedThreatSettings` },
   { key: 'atpMaliciousUrls', group: 'zia', label: 'ATP denylist (security/advanced)', path: `${ZIA}/security/advanced` },
   { key: 'atpSecurityExceptions', group: 'zia', label: 'ATP allowlist (security)', path: `${ZIA}/security` },
-  { key: 'customUrlCategories', group: 'zia', label: 'Custom URL categories', path: `${ZIA}/urlCategories`, query: { customOnly: 'true' } },
+  // All categories, not customOnly: URLs/keywords/IPs a tenant adds to a predefined category (e.g. "Webmail") change
+  // how a destination is categorised too. Predefined entries with nothing added are dropped to keep the snapshot small.
+  { key: 'customUrlCategories', group: 'zia', label: 'URL categories (custom, and URLs added to predefined)', path: `${ZIA}/urlCategories`,
+    pick: (d) => arr(d).filter((c) => c.customCategory || ['urls', 'dbCategorizedUrls', 'keywords', 'keywordsRetainingParentCategory', 'ipRanges', 'ipRangesRetainingParentCategory'].some((k) => arr(c[k]).length)) },
   { key: 'networkServices', group: 'zia', label: 'Network services', path: `${ZIA}/networkServices` },
   { key: 'networkServiceGroups', group: 'zia', label: 'Network service groups', path: `${ZIA}/networkServiceGroups` },
   { key: 'networkApplicationGroups', group: 'zia', label: 'Network application groups', path: `${ZIA}/networkApplicationGroups` },
@@ -290,7 +312,13 @@ async function loadSnapshot(client, { groups = ['zia', 'zcc', 'zpa'], job } = {}
   const snap = { loadedAt: null, data: {}, errors: {} };
   const items = catalog(client).filter((e) => groups.includes(e.group));
   if (job) { job.items = {}; for (const e of items) job.items[e.key] = { label: e.label, group: e.group, state: 'pending' }; }
-  for (const e of items) {
+  // One lane per product (ZIA, ZCC, ZPA, Cloud/Branch Connector), run in parallel; within a lane, calls are sequential
+  // and spaced by the client's per-product rate limiting.
+  const lanes = new Map();
+  for (const e of items) { const f = familyOf(e.path); if (!lanes.has(f)) lanes.set(f, []); lanes.get(f).push(e); }
+  // Up to 3 requests in flight per lane: request starts stay spaced by the rate limiter, but response latency overlaps.
+  await Promise.all([...lanes.values()].map((lane) => { let i = 0; const w = async () => { while (i < lane.length) await loadOne(lane[i++]); }; return Promise.all([w(), w(), w()]); }));
+  async function loadOne(e) {
     if (job) job.items[e.key].state = 'loading';
     try {
       const d = await fetchEndpoint(client, e);
@@ -303,7 +331,7 @@ async function loadSnapshot(client, { groups = ['zia', 'zcc', 'zpa'], job } = {}
         (snap.notSubscribed = snap.notSubscribed || {})[e.key] = why;
         snap.data[e.key] = [];
         if (job) Object.assign(job.items[e.key], { state: 'na', count: 0, error: `Not subscribed on this tenant — ${why}` });
-        continue;
+        return;
       }
       snap.errors[e.key] = err.message;
       if (job) Object.assign(job.items[e.key], { state: 'error', error: err.message });
@@ -466,9 +494,10 @@ async function urlLookup(client, urls, { rateRetries } = {}) {
 async function fetchEndpoint(client, e) {
   if (e.multi) {
     const all = [], failed = [];
-    for (const part of e.multi) {
-      try { for (const r of arr(unwrap(await client.get(part.path)))) all.push(Object.assign({ ruleType: part.type }, r)); }
-      catch (err) { failed.push(`${part.type}: ${err.status || err.message}`); }
+    const parts = await Promise.all(e.multi.map((part) => client.get(part.path).then((d) => ({ part, d }), (err) => ({ part, err }))));
+    for (const { part, d, err } of parts) { // keep rule-type order stable whatever order the responses arrive in
+      if (err) failed.push(`${part.type}: ${err.status || err.message}`);
+      else for (const r of arr(unwrap(d))) all.push(Object.assign({ ruleType: part.type }, r));
     }
     if (failed.length === e.multi.length) throw new Error(`all rule types failed (${failed[0]})`);
     return { data: all, warning: failed.length ? `${failed.length} rule type(s) not available: ${failed.slice(0, 3).join('; ')}` : undefined };
@@ -494,4 +523,4 @@ async function refreshKeys(client, snap, keys) {
   snap.loadedAt = Date.now();
 }
 
-module.exports = { fetchText, zpaScimMembership, zidIndex, zidUserKeys, zpaScimAttrName, zpaScimGroupName, zpaWorks, zpaIdCandidates, jwtClaims, ZClient, loadSnapshot, refreshKeys, ZIA, zpaBase, CAC_TYPES, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, ENDPOINTS };
+module.exports = { familyOf, FAMILY_GAP, fetchText, zpaScimMembership, zidIndex, zidUserKeys, zpaScimAttrName, zpaScimGroupName, zpaWorks, zpaIdCandidates, jwtClaims, ZClient, loadSnapshot, refreshKeys, ZIA, zpaBase, CAC_TYPES, probe, catalog, lookupUser, urlLookup, URL_LOOKUP_MAX, ENDPOINTS };

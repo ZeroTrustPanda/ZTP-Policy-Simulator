@@ -1,4 +1,4 @@
-# ZeroTrustPanda ZS Policy Simulator v1.8.6
+# ZeroTrustPanda ZS Policy Simulator v1.8.7
 
 **Would this be allowed, blocked or bypassed — and by what?** A standalone simulator that pulls your live Zscaler policy over OneAPI and evaluates a transaction across ZIA, ZPA, Client Connector and Cloud & Branch Connector the way the cloud would, in rule order, then shows the deciding rule and everything else that could change the outcome.
 
@@ -7,12 +7,12 @@ Companion to the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustP
 ## Downloads
 | Platform | File |
 |---|---|
-| Windows x64 | [ZTP-Policy-Simulator-1.8.6-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.6/ZTP-Policy-Simulator-1.8.6-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
-| macOS Apple Silicon | [ZTP-Policy-Simulator-1.8.6-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.6/ZTP-Policy-Simulator-1.8.6-macos-arm64.zip) |
-| macOS Intel | [ZTP-Policy-Simulator-1.8.6-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.6/ZTP-Policy-Simulator-1.8.6-macos-x64.zip) |
+| Windows x64 | [ZTP-Policy-Simulator-1.8.7-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.7/ZTP-Policy-Simulator-1.8.7-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
+| macOS Apple Silicon | [ZTP-Policy-Simulator-1.8.7-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.7/ZTP-Policy-Simulator-1.8.7-macos-arm64.zip) |
+| macOS Intel | [ZTP-Policy-Simulator-1.8.7-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.7/ZTP-Policy-Simulator-1.8.7-macos-x64.zip) |
 | Source | clone the repo, or GitHub's "Source code" download on the release |
 
-Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.6/SHA256SUMS.txt)
+Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.7/SHA256SUMS.txt)
 
 No install, no Node.js required. Run it and it opens `http://127.0.0.1:8787`.
 macOS builds are unsigned — before first run: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`.
@@ -110,6 +110,41 @@ Port from the URL scheme (hostnames assume HTTPS/443) · network service and app
 - Cloud & Branch Connector support follows Zscaler's API reference and SDK; it was tested against sample policies, not yet a live connector tenant. When a workload group has several tag sets joined by different AND/OR operators, check one against the console.
 - No per-transaction log lookup: the console's transaction-log endpoints refuse API-client tokens. Use the console's Web / Firewall Insights logs for per-transaction proof.
 - ZCC field names follow the shapes verified by the Policy Wizard; report any app profile that shows "no forwarding profile linked".
+- Zscaler-managed categories whose members the API doesn't return (e.g. *Zscaler Recommended Exemptions*, *Office 365* as a URL category) match only when the URL lookup returns them; rules on them may show as not matching for those destinations.
+
+## Changes in 1.8.7
+We ran a customer's complete exported policy through the simulator, module by module. That covered URL Filtering, Cloud App Control, SSL Inspection, Sandbox, DNS Control, Firewall and Advanced Threat Protection. Each result was checked against how ZIA evaluates the policy. The fixes below are the result. The new `semantics` tests cover each one with synthetic data.
+
+**Cloud App Control**
+- **"Block Application Access" rules now block.** Zscaler's action names differ by rule type (`BLOCK_CONSUMER_APPS`, `BLOCK_ENTERPRISE_COLLABORATION_APPS`, `DENY_IT_SERVICES_USE`, `BLOCK_CHAT`, `BLOCK_WEBMAIL_VIEW`, …). The simulator recognised only a few of them, so most block rules showed as Allow.
+- **Cloud App Control is evaluated before URL Filtering.** When a Cloud App Control rule allows the app, URL Filtering is not applied, unless that rule has *Cascade to URL Filtering* turned on. Example: a group allowed Google Chat by Cloud App Control is no longer shown as blocked by a URL Filtering "Online Chat" block. If the allow depends on a group the user may be in, the block is shown with that group as a condition.
+- **Upload-only restrictions apply to uploads only.** Examples: `DENY_AI_ML_UPLOAD`, `BLOCK_WEBMAIL_ATTACHMENT_SEND`.
+
+**SSL Inspection**
+- **"Do Not Inspect" with "Bypass Other Policies"** (UCaaS One Click, Office 365 One Click, Zscaler Recommended Exemptions) skips the other web policies. Before, these transactions were still cautioned or blocked by URL Filtering.
+- **The destination criteria in an SSL rule are alternatives.** A rule with a URL category, a cloud app and a destination group matches when the destination is in any one of them. Before, it needed all three.
+- **Undecrypted HTTPS is not "HTTPS" to URL Filtering.** ZIA sees *SSL/TLS* for tunnelled traffic and *Tunnel SSL/TLS* for PAC or explicit proxy. A rule that lists only HTTP/HTTPS no longer matches undecrypted traffic. If a rule lists only one of the two, the result depends on the forwarding method and says so.
+
+**URL and category matching**
+- **`example.com` matches that host only.** `.example.com` matches the host and all its subdomains, as in ZIA. Before, both forms matched subdomains, so allow and block lists over-matched. This applies to custom URL categories, ATP allow/deny lists and firewall FQDNs.
+- **More of the category definition is used.** Custom-category **keywords** are matched anywhere in the URL, and *retain parent category* IP ranges are evaluated. URLs a tenant adds to a **predefined** category (e.g. Webmail) are now loaded and evaluated.
+
+**Sandbox and default rules**
+- **A sandbox rule no longer shows as Blocked.** The result shows the first-time action instead: *quarantined until analysed* or *delivered and analysed*. "Blocked if the sandbox finds it malicious" is listed as a condition. Before, every .zip or .exe download showed **Blocked by Sandbox**.
+- **A default rule that has its own criteria applies only when they fit** (e.g. the Default BA Rule's file types).
+- **DNS "Unknown DNS Traffic" no longer blocks every lookup.** The predefined rule comes back from the API with no criteria, so it looked like a catch-all. Predefined rules now run in their real order, with the default rule last.
+
+**Identity and objects**
+- **Users match by login.** "graves@…" no longer matches "Dana Graves(dgraves@…)".
+- **A user the directory doesn't know** makes group and department rules *depend on* that context, instead of *not matching*.
+- **Missing IP groups no longer match all traffic.** A source or destination IP group that isn't in the loaded policy now shows as unknown instead of "any source/destination". IDs are compared as text, so number/string mismatches no longer hide a group.
+- **File type rules set to Upload & Download** now match both operations.
+- **Bulk runs keep the lookup result for cloud apps.** "Zscaler found no cloud app" now means *not a cloud app* in bulk too, so cloud-app rules no longer turn every bulk row conditional.
+
+**Faster**
+- **Policy load is about 40–60% faster.** ZIA, ZPA, Client Connector and Cloud & Branch Connector load in parallel, and the per-product rate spacing is kept. Calls overlap their latency, and all calls share one token request.
+- **Bulk resolves each hostname once, in parallel,** before simulating.
+- **IP ranges are parsed once and cached**, so a large block list is no longer re-parsed for every row. Simulation is about 2.5× faster per row.
 
 ## Changes in 1.8.6
 Customer-reported fix: a bulk run on TCP/53 showed every IP as **Allowed** with the deciding-rule columns blank, even though a "SIRT Block" rule covered many of the IPs and a "Recommended Firewall Rule" allows DNS.

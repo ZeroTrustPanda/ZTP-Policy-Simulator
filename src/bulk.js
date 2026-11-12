@@ -248,7 +248,13 @@ async function lookupAll(job, client, keys, cache, urlLookup, batchSize, timing 
   }
 }
 
-// deps: { buildContext(session, body), simulate(snap, ctx, manual), urlLookup, URL_LOOKUP_MAX }
+// Hostname of a bulk target (null for IPs, CIDRs and wildcards: those aren't resolved).
+function hostOf(target) {
+  const t = M.parseTarget(target || '');
+  return t && !t.isIp && !t.isWildcard ? t.host : null;
+}
+
+// deps: { buildContext(session, body), simulate(snap, ctx, manual), urlLookup, URL_LOOKUP_MAX, resolve4? }
 async function runJob(session, job, rows, opts, deps) {
   job.data = (session.snap && session.snap.data) || {};
   try {
@@ -257,6 +263,16 @@ async function runJob(session, job, rows, opts, deps) {
     if (opts.lookup && session.client) {
       job.phase = 'lookup';
       await lookupAll(job, session.client, rows.filter((r) => !r.categories).map((r) => lookupKey(r.target)), cache, deps.urlLookup, deps.URL_LOOKUP_MAX || 100, deps.timing);
+    }
+    // Resolve every distinct hostname once, in parallel, instead of one DNS query per row inside the loop.
+    let resolved = null;
+    if (deps.resolve4) {
+      job.phase = 'resolve';
+      const hosts = [...new Set(rows.map((r) => hostOf(r.target)).filter(Boolean))];
+      resolved = new Map();
+      let next = 0;
+      const worker = async () => { while (next < hosts.length && !job.cancelled) { const h = hosts[next++]; try { resolved.set(h, (await deps.resolve4(h)).slice(0, 8)); } catch { resolved.set(h, []); } } };
+      await Promise.all(Array.from({ length: Math.min(16, hosts.length) }, worker));
     }
     job.phase = 'simulate';
     for (let i = 0; i < rows.length && !job.cancelled; i++) {
@@ -272,7 +288,11 @@ async function runJob(session, job, rows, opts, deps) {
           port: row.port || opts.defaultPort || ((row.protocol || opts.defaultProtocol || 'tcp').toLowerCase() === 'tcp' && !/^[a-z]+:\/\//i.test(row.target) ? '443' : ''),
           sourceIp: row.sourceIp || '', location: row.location || '', destCountry: row.destCountry || '', user: row.user || '',
           categories: [...cat.categories, ...cat.security], noLookup: true, useZpa: opts.useZpa !== false, cloudApp: cat.application || null,
+          // A Zscaler lookup that returned no cloud app means "not a cloud app" (rules on cloud apps don't match),
+          // exactly as in a single simulation.
+          categorySource: cat.source === 'Zscaler lookup' ? 'Zscaler lookup' : undefined,
         };
+        if (resolved) { const h = hostOf(row.target); if (h && resolved.has(h)) body.resolvedIps = resolved.get(h); }
         const ctx = await deps.buildContext(session, body);
         const out = deps.simulate(session.snap, ctx, {});
         job.results.push(resultRow(i, row, out, cat, R.normExpected(row.expected) || opts.expected || '', job.data));

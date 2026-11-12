@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.7 — 2026-11-12
+- Full-policy validation against a customer export (URL Filtering, Cloud App Control, SSL, Sandbox, DNS, Firewall, ATP): 16 evaluation fixes.
+- Cloud App Control: block/deny action enums (BLOCK_*_APPS, DENY_*_USE, BLOCK_CHAT, BLOCK_*_VIEW) block; evaluated before URL Filtering; an allow without "Cascade to URL Filtering" stops URL Filtering; upload-only restrictions apply to uploads.
+- SSL: "Do Not Inspect + Bypass Other Policies" skips the other web policies; URL category / cloud app / destination group criteria are alternatives (OR); undecrypted HTTPS is SSL/TLS or Tunnel SSL/TLS to URL Filtering, not HTTPS.
+- URL entries: "example.com" is that host only, ".example.com" adds subdomains; custom-category keywords and retain-parent IP ranges; URLs added to predefined categories loaded.
+- Sandbox shows the first-time action (scan / quarantine), not BLOCK; default rules with their own criteria apply only when they fit; DNS "Unknown DNS Traffic" no longer a catch-all, predefined rules ordered.
+- Identity: users matched by login, not substring; group/department rules "depend" when the user isn't found; source IP groups not loaded are "unknown", not "any"; file type UPLOAD_DOWNLOAD.
+- Faster: products load in parallel with per-product rate spacing and one shared token (policy load ~40–60% faster); bulk resolves hostnames once in parallel; IP range parsing cached (bulk ~2.5× faster).
+
 ## 1.8.6 — 2026-11-12
 - Rule labels are not conditions (every labelled rule was "unknown"); tenant default rule decides when nothing else matches; a matched block rule decides even if an earlier rule might apply; bulk conditions column spelled out.
 

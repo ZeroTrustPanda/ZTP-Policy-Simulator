@@ -45,12 +45,20 @@ function critIdentity(rule, ctx) {
   if (!rl.users.length && !rl.groups.length && !rl.departments.length) return { field: 'user/group/department', status: 'any', detail: 'not restricted' };
   if (ctx.source === 'workload') return { field: 'user/group/department', status: 'nomatch', detail: `rule applies to ${[...names(rl.users), ...names(rl.groups), ...names(rl.departments)].slice(0, 4).join(', ')}; workload traffic carries no user identity` };
   const hits = [];
+  const scope = [...names(rl.groups).map((x) => 'Group ' + x), ...names(rl.users).map((x) => 'User ' + x), ...names(rl.departments).map((x) => 'Department ' + x)].slice(0, 4).join(', ') + (rl.users.length + rl.groups.length + rl.departments.length > 4 ? '…' : '');
   const haveAny = ctx.user || (ctx.groups && ctx.groups.length) || ctx.department;
-  if (!haveAny) return { field: 'user/group/department', status: 'unknown', kind: 'identity', scope: [...names(rl.groups).map((x) => 'Group ' + x), ...names(rl.users).map((x) => 'User ' + x), ...names(rl.departments).map((x) => 'Department ' + x)].slice(0, 4).join(', ') + (rl.users.length + rl.groups.length + rl.departments.length > 4 ? '…' : ''), detail: `rule restricts to ${[...names(rl.users), ...names(rl.groups), ...names(rl.departments)].slice(0, 6).join(', ')} — no user context supplied` };
-  if (ctx.user) for (const u of rl.users) if (lc(u.name).includes(lc(ctx.user))) hits.push(`user ${u.name}`);
+  if (!haveAny) return { field: 'user/group/department', status: 'unknown', kind: 'identity', scope, detail: `rule restricts to ${[...names(rl.users), ...names(rl.groups), ...names(rl.departments)].slice(0, 6).join(', ')} — no user context supplied` };
+  // ZIA shows users as "Display Name(login@domain)": match the login/email or the whole name exactly, never a substring.
+  const ids = new Set([ctx.user, ctx.userEmail, ctx.userResolved && ctx.userResolved.email, ctx.userResolved && ctx.userResolved.loginName, ctx.userResolved && ctx.userResolved.name].filter(Boolean).map(lc));
+  const userKeys = (u) => { const n = String((u && (u.name || u.loginName || u.email)) || ''); const m = n.match(/\(([^()]+)\)\s*$/); return [n, m && m[1], u && u.email, u && u.loginName].filter(Boolean).map(lc); };
+  for (const u of rl.users) if (userKeys(u).some((k) => ids.has(k))) hits.push(`user ${u.name}`);
   for (const g of rl.groups) if ((ctx.groups || []).some((x) => lc(x) === lc(g.name))) hits.push(`group ${g.name}`);
   for (const d of rl.departments) if (ctx.department && lc(d.name) === lc(ctx.department)) hits.push(`department ${d.name}`);
   if (hits.length) return { field: 'user/group/department', status: 'match', detail: hits.join(', ') };
+  // A user whose directory record wasn't found has unknown groups/department: a group rule "depends", it doesn't "miss".
+  const groupsKnown = (ctx.groups && ctx.groups.length) || ctx.userResolved || ctx.groupsKnown;
+  if ((rl.groups.length && !groupsKnown) || (rl.departments.length && !ctx.department && !ctx.userResolved))
+    return { field: 'user/group/department', status: 'unknown', kind: 'identity', scope, detail: `rule applies to ${[...names(rl.groups), ...names(rl.departments)].slice(0, 6).join(', ')}; ${ctx.user}'s groups/department aren't known (user not found in the directory)` };
   return { field: 'user/group/department', status: 'nomatch', detail: `rule applies to ${[...names(rl.users), ...names(rl.groups), ...names(rl.departments)].slice(0, 6).join(', ')}` };
 }
 
@@ -72,8 +80,19 @@ function critProtocol(rule, ctx, key = 'protocols') {
   const scheme = ctx.target && ctx.target.scheme;
   const want = scheme === 'https' || ctx.port === 443 ? 'HTTPS_RULE' : scheme === 'http' || ctx.port === 80 ? 'HTTP_RULE' : scheme === 'ftp' ? 'FTP_RULE' : null;
   if (!want) return { field: 'protocol', status: 'unknown', scope: 'Protocol ' + p.join(', ').replace(/_RULE/g, ''), detail: `rule protocols ${p.join(', ')}; transaction protocol not specified` };
-  const ok = p.some((x) => x === want || (want === 'HTTPS_RULE' && /TUNNELSSL|DOHTTPS/.test(x)));
-  return { field: 'protocol', status: ok ? 'match' : 'nomatch', detail: `rule ${p.join(', ')}; transaction ${want}` };
+  const list = p.join(', ');
+  // HTTPS that SSL Inspection doesn't decrypt is not "HTTPS" to the web policies: ZIA sees "SSL/TLS" (SSL_RULE) for
+  // tunnelled traffic (Z-Tunnel 2.0, GRE, IPsec) and "Tunnel SSL/TLS" (TUNNELSSL_RULE) for a PAC/explicit-proxy CONNECT.
+  if (want === 'HTTPS_RULE' && ctx.sslDecrypted === false) {
+    const ssl = p.includes('SSL_RULE'), tun = p.includes('TUNNELSSL_RULE');
+    if (ssl && tun) return { field: 'protocol', status: 'match', detail: `rule ${list}; undecrypted HTTPS is SSL/TLS (tunnel) or Tunnel SSL/TLS (PAC) — both listed` };
+    if (ssl || tun) return { field: 'protocol', status: 'unknown', kind: 'other', scope: `Forwarding method: ${ssl ? 'tunnel (Z-Tunnel 2.0/GRE/IPsec)' : 'PAC / explicit proxy'}`,
+      detail: `rule lists ${ssl ? 'SSL/TLS' : 'Tunnel SSL/TLS'} only; undecrypted HTTPS is ${ssl ? 'SSL/TLS when tunnelled' : 'Tunnel SSL/TLS when sent by PAC/explicit proxy'} — depends on how the traffic is forwarded` };
+    return { field: 'protocol', status: 'nomatch', detail: `rule ${list}; HTTPS isn't decrypted here, so ZIA sees SSL/TLS or Tunnel SSL/TLS, not HTTPS` };
+  }
+  if (want === 'HTTPS_RULE' && ctx.sslDecrypted == null && !p.includes(want) && (p.includes('SSL_RULE') || p.includes('TUNNELSSL_RULE')))
+    return { field: 'protocol', status: 'unknown', kind: 'other', scope: 'HTTPS not decrypted', detail: `rule ${list}; applies only if the HTTPS isn't decrypted (SSL Inspection result unknown)` };
+  return { field: 'protocol', status: p.includes(want) ? 'match' : 'nomatch', detail: `rule ${list}; transaction ${want}${want === 'HTTPS_RULE' && ctx.sslDecrypted ? ' (decrypted)' : ''}` };
 }
 
 function critUrlCategories(rule, ctx, key = 'urlCategories') {
@@ -97,10 +116,15 @@ function critFileType(rule, ctx, key = 'fileTypes') {
 
 function critSourceIp(rule, ctx, snap) {
   const addrs = [...arr(rule.srcIps)];
-  for (const g of arr(rule.srcIpGroups)) {
-    const full = (snap.ipSourceGroups || []).find((x) => x.id === g.id);
-    if (full) addrs.push(...arr(full.ipAddresses));
+  // Firewall/DNS rules call them srcIpGroups; URL Filtering, SSL and other web rules call them sourceIpGroups.
+  const missing = [];
+  for (const g of [...arr(rule.srcIpGroups), ...arr(rule.sourceIpGroups)]) {
+    const full = (snap.ipSourceGroups || []).find((x) => String(x.id) === String(g.id));
+    if (full && arr(full.ipAddresses).length) addrs.push(...arr(full.ipAddresses));
+    else missing.push(g.name || (full && full.name) || g.id);
   }
+  // A source group we can't see (not loaded, or no addresses returned) still restricts the rule: never "any source".
+  if (!addrs.length && missing.length) return { field: 'source IP', status: 'unknown', scope: `Source IP group ${missing.join(', ')}`, detail: `source IP group ${missing.join(', ')} isn't in the policy snapshot — can't check membership` };
   if (!addrs.length) return { field: 'source IP', status: 'any', detail: 'not restricted' };
   if (!ctx.sourceIp) return { field: 'source IP', status: 'unknown', scope: 'Source IP ' + addrs.slice(0, 3).join(', '), detail: `rule source ${addrs.slice(0, 5).join(', ')}; no source IP supplied` };
   const r = M.ipInList(ctx.sourceIp, addrs);
@@ -295,10 +319,10 @@ function rationalize(ctx, snap) {
 
 function expandServices(rule, snap) {
   const all = [];
-  const byId = (id) => arr(snap.networkServices).find((x) => x.id === id);
+  const byId = (id) => arr(snap.networkServices).find((x) => String(x.id) === String(id));
   for (const s of arr(rule.nwServices)) all.push(byId(s.id) || s);
   for (const g of arr(rule.nwServiceGroups)) {
-    const full = arr(snap.networkServiceGroups).find((x) => x.id === g.id);
+    const full = arr(snap.networkServiceGroups).find((x) => String(x.id) === String(g.id));
     if (full && arr(full.services).length) for (const s of full.services) all.push(byId(s.id) || s);
     else all.push(Object.assign({ _group: true }, g));
   }
@@ -328,7 +352,7 @@ function critServices(rule, ctx, snap) {
 function critApps(rule, ctx, snap) {
   const apps = nonAny(arr(rule.nwApplications).map((a) => (a && a.name) || a));
   for (const g of arr(rule.nwApplicationGroups)) {
-    const full = arr(snap.networkApplicationGroups).find((x) => x.id === g.id);
+    const full = arr(snap.networkApplicationGroups).find((x) => String(x.id) === String(g.id));
     if (full && arr(full.networkApplications).length) apps.push(...full.networkApplications);
     else apps.push(`group:${g.name || g.id}`);
   }
@@ -400,12 +424,15 @@ function rankOn(snap) {
   if (snap && typeof snap._rankOverride === 'boolean') return snap._rankOverride;
   return !!(snap && snap.advancedSettings && snap.advancedSettings.enableAdminRankAccess === true);
 }
+// Several predefined rules can sit at the bottom (e.g. DNS Control: "Fallback ZPA Resolver" -3, "Unknown DNS Traffic" -2,
+// "Default Firewall DNS Rule" -1): they run in that order, and the one flagged defaultRule is always the last resort.
 function sortKey(r, ranked) {
-  const o = Number(r.order);
-  return [isDefaultRule(r) ? 1 : 0, ranked ? rankOf(r) : 0, Number.isFinite(o) && o >= 0 ? o : 1e9];
+  const o = Number(r.order), d = isDefaultRule(r);
+  const catchAll = d && (r.defaultRule === true || r.default === true) ? 1 : 0;
+  return [d ? 1 : 0, ranked && !d ? rankOf(r) : 0, catchAll, Number.isFinite(o) && o >= 0 ? o : d && Number.isFinite(o) ? o : 1e9];
 }
 function sortRules(rules, ranked = false) {
-  return arr(rules).slice().sort((a, b) => { const x = sortKey(a, ranked), y = sortKey(b, ranked); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]; });
+  return arr(rules).slice().sort((a, b) => { const x = sortKey(a, ranked), y = sortKey(b, ranked); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2] || x[3] - y[3]; });
 }
 // Rules that admin rank moves ahead of the deciding rule although their order number is higher, or behind it although
 // lower: shown so the result explains why a rule with a later order number decided.
@@ -491,7 +518,8 @@ function runModule(module, rules, buildCrits, { blockRe, allowRe, defaultVerdict
   // Nothing matched definitely: the tenant's own default rule (e.g. "Default Firewall Filtering Rule" → Block/Drop)
   // applies, never a hard-coded Allow.
   let viaDefault = false;
-  if (decidingIdx < 0) { const di = evaluated.findIndex((e) => e._default); if (di >= 0) { decidingIdx = di; viaDefault = evaluated[di].status !== 'match'; } }
+  // A default rule that has criteria of its own (e.g. Sandbox "Default BA Rule" file types) only applies when they fit.
+  if (decidingIdx < 0) { const di = evaluated.findIndex((e) => e._default && e.status !== 'nomatch'); if (di >= 0) { decidingIdx = di; viaDefault = evaluated[di].status !== 'match'; } }
   const preempt = evaluated.slice(0, decidingIdx < 0 ? evaluated.length : decidingIdx).filter((e) => e.status === 'unknown');
   const deciding = decidingIdx >= 0 ? evaluated[decidingIdx] : null;
   const verdictOf = (a) => (a == null ? 'UNKNOWN' : /ISOLATE/i.test(a) ? 'ISOLATE' : /CAUTION/i.test(a) ? 'CAUTION' : blockRe && blockRe.test(a) ? 'BLOCK' : allowRe && allowRe.test(a) ? 'ALLOW' : a);
@@ -551,6 +579,9 @@ function mDns(snap, ctx) {
   const dnsCtx = Object.assign({}, ctx);
   return runModule('DNS Control', snap.dnsRules, (r) => {
     const proto = nonAny(r.protocols);
+    // The predefined "Unknown DNS Traffic" rule catches traffic on DNS ports that isn't a recognisable DNS query; an
+    // ordinary lookup never matches it (the API returns it with no criteria, so it would otherwise look like a catch-all).
+    if (/unknown dns/i.test(r.name || '') && (r.predefined || isDefaultRule(r))) return [{ field: 'dns traffic type', status: ctx.dnsUnknown ? 'match' : 'nomatch', detail: 'applies only to non-DNS or malformed traffic on DNS ports; this is a standard DNS query' }];
     return [
       proto.length ? { field: 'dns protocol', status: ctx.dnsProtocol ? (proto.some((p) => lc(p).startsWith(lc(ctx.dnsProtocol))) ? 'match' : 'nomatch') : 'unknown', detail: `rule ${proto.join(', ')}` } : null,
       critSourceIp(r, dnsCtx, snap), critDest(r, dnsCtx, snap), AS.critAppServices(r, ctx, snap), critResCategories(r, ctx), critZpaRedirect(r, ctx, snap), critIdentity(r, ctx), critLocation(r, ctx), critTimeWindows(r), W.critWorkload(r, ctx),
@@ -564,18 +595,34 @@ function mDns(snap, ctx) {
   }, { ranked: rankOn(snap), blockRe: /^BLOCK/, allowRe: /^(ALLOW|REDIR)/, defaultReason: 'no matching rule (DNS resolves normally)' });
 }
 
+// Sandbox rules don't block a file for matching: baRuleAction (BLOCK) applies only once the sandbox has a malicious
+// verdict for the file. A file it hasn't seen gets the first-time action: QUARANTINE (held until analysed) or
+// ALLOW_SCAN (delivered and analysed); ALLOW_NOSCAN delivers it without analysis.
+const FIRST_TIME = { QUARANTINE: 'quarantined until the sandbox finishes analysing it', QUARANTINE_ISOLATE: 'quarantined (isolated) until analysed', ALLOW_SCAN: 'delivered and analysed by the sandbox', ALLOW_NOSCAN: 'delivered without sandbox analysis' };
 function mSandbox(snap, ctx) {
-  return runModule('Sandbox (Behavioral Analysis)', snap.sandboxRules, (r) => [
+  const src = new Map(arr(snap.sandboxRules).map((r) => [String(r.id), r]));
+  const res = runModule('Sandbox (Behavioral Analysis)', snap.sandboxRules, (r) => [
     critFileType(r, ctx), critUrlCategories(r, ctx), critProtocol(r, ctx), critIdentity(r, ctx), critLocation(r, ctx),
     W.critWorkload(r, ctx), critCloudApps(r, ctx), ...critUnmodelled(r, ['cloudApplications']),
   ].filter(Boolean), { ranked: rankOn(snap), blockRe: /BLOCK/, allowRe: /ALLOW/, defaultReason: 'no matching rule (file is not held for sandbox analysis by policy)' });
+  const d = res.decidingRule;
+  if (!d) return res;
+  const r = src.get(String(d.id)) || {};
+  let first = r.firstTimeEnable === false ? null : String(r.firstTimeOperation || (r.firstTimeEnable ? 'ALLOW_SCAN' : '')).toUpperCase() || null;
+  const malicious = /BLOCK/i.test(r.baRuleAction || d.action || '') ? 'BLOCK' : 'ALLOW';
+  res.verdict = /^QUARANTINE/.test(first || '') ? 'QUARANTINE' : first === 'ALLOW_NOSCAN' || r.firstTimeEnable === false ? 'ALLOW' : 'SCAN';
+  if (r.firstTimeEnable === false) first = 'ALLOW_NOSCAN';
+  res.firstTime = first; res.ifMalicious = malicious;
+  res.reason = `Sandbox rule "${d.name}" applies: a file the sandbox hasn't seen is ${FIRST_TIME[first] || 'analysed by the sandbox'}; ${malicious === 'BLOCK' ? 'once the sandbox finds it malicious it is blocked' : 'malicious files are still allowed by this rule'}`;
+  return res;
 }
 
 function mFileType(snap, ctx) {
   const op = ctx.operation; // DOWNLOAD / UPLOAD
   return runModule('File Type Control', snap.fileTypeRules, (r) => [
     critFileType(r, ctx), critUrlCategories(r, ctx),
-    nonAny(r.operation).length ? { field: 'operation', status: op ? (lc(r.operation) === lc(op) || lc(r.operation) === 'any' ? 'match' : 'nomatch') : 'unknown', detail: `rule ${r.operation}` } : null,
+    // operation is UPLOAD, DOWNLOAD or UPLOAD_DOWNLOAD (both)
+    nonAny(r.operation).length ? { field: 'operation', status: op ? (arr(r.operation).some((o) => lc(o).split('_').includes(lc(op)) || lc(o) === 'any') ? 'match' : 'nomatch') : 'unknown', detail: `rule ${arr(r.operation).join(', ')}` } : null,
     critProtocol(r, ctx), critIdentity(r, ctx), critLocation(r, ctx), critTimeWindows(r),
     W.critWorkload(r, ctx), critCloudApps(r, ctx), ...critUnmodelled(r, ['cloudApplications']),
   ].filter(Boolean), { ranked: rankOn(snap), blockRe: /BLOCK/, allowRe: /ALLOW|CAUTION/, defaultReason: 'no matching rule (file type allowed)' });
@@ -590,7 +637,7 @@ function mDlp(snap, ctx) {
   const candidates = res.rules.filter((r) => r.status !== 'nomatch');
   const rules = sortRules(snap.webDlpRules, rankOn(snap));
   for (const c of candidates) {
-    const src = rules.find((x) => x.id === c.id) || {};
+    const src = rules.find((x) => String(x.id) === String(c.id)) || {};
     c.engines = names(src.dlpEngines);
     c.dictionaries = names(src.dlpDictionaries);
   }
@@ -605,15 +652,37 @@ function mDlp(snap, ctx) {
   return res;
 }
 
+// SSL Inspection destination: URL categories, cloud applications and destination groups/addresses are alternatives —
+// the rule matches if the destination is in ANY of them (then ANDed with users/groups/locations like other criteria).
+function critSslDest(r, ctx, snap) {
+  const parts = [
+    nonAny(arr(r.urlCategories)).length ? critUrlCategories(r, ctx, 'urlCategories') : null,
+    (arr(r.destAddresses).length || arr(r.destIpGroups).length) ? critDest({ destAddresses: r.destAddresses, destIpGroups: r.destIpGroups }, ctx, snap) : null,
+    critCloudApps(r, ctx),
+  ].filter((c) => c && c.status !== 'any');
+  if (!parts.length) return null;
+  if (parts.length === 1) return parts[0];
+  const hit = parts.find((c) => c.status === 'match');
+  if (hit) return { field: 'destination', status: 'match', detail: `${hit.detail} (rule destination: ${parts.map((c) => c.field).join(' or ')})` };
+  const unk = parts.filter((c) => c.status === 'unknown');
+  if (unk.length) return { field: 'destination', status: 'unknown', scope: unk.map((c) => c.scope || c.field).join(' or '), detail: unk.map((c) => c.detail).join('; ') };
+  return { field: 'destination', status: 'nomatch', detail: parts.map((c) => c.detail).join('; ') };
+}
+const sslSub = (a) => (a && typeof a === 'object' ? a.doNotDecryptSubActions || {} : {});
 function mSsl(snap, ctx) {
   const https = ctx.port === 443 || (ctx.target && ctx.target.scheme === 'https') || (!ctx.port && !(ctx.target && ctx.target.scheme));
+  const src = new Map(arr(snap.sslRules).map((r) => [String(r.id), r]));
   const res = runModule('SSL Inspection', snap.sslRules, (r) => [
-    critUrlCategories(r, ctx, 'urlCategories'), critDest({ destAddresses: r.destAddresses, destIpGroups: r.destIpGroups }, ctx, snap), critIdentity(r, ctx), critLocation(r, ctx), critSourceIp(r, ctx, snap),
-    W.critWorkload(r, ctx), critCloudApps(r, ctx), ...critUnmodelled(r, ['cloudApplications', 'platforms']),
+    critSslDest(r, ctx, snap), critIdentity(r, ctx), critLocation(r, ctx), critSourceIp(r, ctx, snap),
+    W.critWorkload(r, ctx), ...critUnmodelled(r, ['cloudApplications', 'platforms']),
   ].filter(Boolean), { ranked: rankOn(snap), blockRe: /BLOCK/, allowRe: /DECRYPT/, defaultReason: 'no matching rule (default SSL inspection action)' });
   if (res.decidingRule) {
     const a = res.decidingRule.action;
     res.verdict = /DO_NOT_DECRYPT/.test(a || '') ? 'NOT_DECRYPTED' : /DECRYPT/.test(a || '') ? 'DECRYPTED' : /BLOCK/.test(a || '') ? 'BLOCK' : a;
+    // "Do Not Inspect" + "Bypass Other Policies": no other web policy (URL Filtering, Cloud App Control, ATP, file type,
+    // sandbox, DLP) is applied to the transaction. "Evaluate Other Policies" applies them to the undecrypted request.
+    const raw = (src.get(String(res.decidingRule.id)) || {}).action;
+    if (res.verdict === 'NOT_DECRYPTED' && sslSub(raw).bypassOtherPolicies === true) res.bypassOtherPolicies = true;
   } else res.verdict = 'DEFAULT';
   res.httpsApplicable = https;
   if (https && res.verdict === 'NOT_DECRYPTED') res.note = 'HTTPS is not decrypted for this transaction: URL-path, DLP, sandbox, file-type and ATP content checks cannot see inside it (domain/category-level checks still apply).';
@@ -965,24 +1034,36 @@ function mZpa(snap, ctx) {
 }
 
 // Cloud App Control: rules per application type; the destination's cloud app comes from Zscaler's URL lookup.
-function cacAction(r) {
+// Cloud App Control action enums are per rule type, e.g. ALLOW_WEBMAIL_VIEW, BLOCK_CONSUMER_APPS, DENY_IT_SERVICES_USE,
+// BLOCK_CHAT, CAUTION_AI_ML_WEB_USE, ISOLATE_FILE_SHARE_VIEW, or the generic ALLOW/BLOCK/CAUTION/ISOLATE.
+// Access-level actions (…_APPS, …_VIEW, …_USE, CHAT, VIEW_LISTEN) decide the transaction; operation-level ones
+// (…_UPLOAD, …_SEND, …_POST, ATTACHMENT, FILE_TRANSFER, …) only restrict that operation.
+const CAC_OP = /(UPLOAD|SEND|POST|EDIT|DELETE|DOWNLOAD|RENAME|CREATE|INVITE|COMMENT|PRINT)$|_(UPLOAD|SEND|POST)_|FILE_TRANSFER|ATTACHMENT/i;
+const cacKind = (a) => { const m = String(a).toUpperCase().match(/^(ALLOW|BLOCK|DENY|CAUTION|ISOLATE)(?:_|$)/); return m ? (m[1] === 'DENY' ? 'BLOCK' : m[1]) : null; };
+function cacAction(r, op) {
   const acts = arr(r.actions).map(String);
-  if (!acts.length) return r.action || 'ALLOW';
-  if (acts.some((a) => /ISOLATE/i.test(a))) return 'ISOLATE';
-  if (acts.some((a) => /^BLOCK$|DENY.*(VIEW|ACCESS|BROWSE|ALL|USE)|BLOCK_ALL/i.test(a))) return 'BLOCK';
-  if (acts.some((a) => /CAUTION/i.test(a))) return 'CAUTION';
-  return 'ALLOW';
+  if (!acts.length) return ruleAction(r) || 'ALLOW';
+  const access = acts.filter((a) => !CAC_OP.test(a.replace(/^(ALLOW|BLOCK|DENY|CAUTION|ISOLATE)_/i, '')));
+  const opActs = acts.filter((a) => !access.includes(a));
+  const kinds = access.map(cacKind).filter(Boolean);
+  if (op) { const o = opActs.filter((a) => cacKind(a) === 'BLOCK' && new RegExp(op === 'UPLOAD' ? 'UPLOAD|SEND|POST|ATTACHMENT|FILE_TRANSFER' : op, 'i').test(a)); if (o.length) return 'BLOCK'; }
+  for (const k of ['BLOCK', 'ISOLATE', 'CAUTION', 'ALLOW']) if (kinds.includes(k)) return k;
+  return opActs.length && opActs.every((a) => cacKind(a) === 'BLOCK') ? 'ALLOW' : (cacKind(acts[0]) || 'ALLOW');
 }
 function mCloudApp(snap, ctx) {
   if (!snap.cloudAppRules) return { module: 'Cloud App Control', verdict: 'N/A', confidence: 'definite', decidingRule: null, couldOverride: [], rules: [], considered: 0, reason: 'Cloud App Control rules not loaded' };
   const app = ctx.cloudApp;
   if (!app) return { module: 'Cloud App Control', verdict: 'ALLOW', confidence: 'definite', decidingRule: null, couldOverride: [], rules: [], considered: 0, reason: 'No cloud application identified for this destination (Zscaler lookup returned none)' };
-  const rel = arr(snap.cloudAppRules).filter((r) => arr(r.applications).some((a) => lc((a && (a.name || a.id)) || a) === lc(app)))
-    .map((r) => Object.assign({}, r, { action: cacAction(r), _acts: arr(r.actions) }));
+  const op = /^UPLOAD$/i.test(ctx.operation || '') || /^(POST|PUT)$/i.test(ctx.method || '') ? 'UPLOAD' : null;
+  const rel = arr(snap.cloudAppRules).filter((r) => arr(r.applications).some((a) => norm((a && (a.name || a.id)) || a) === norm(app)))
+    .map((r) => Object.assign({}, r, { action: cacAction(r, op), _acts: arr(r.actions) }));
   const out = runModule('Cloud App Control', rel, (r) => [critIdentity(r, ctx), critLocation(r, ctx), critTimeWindows(r), W.critWorkload(r, ctx),
     { field: 'cloud app', status: 'match', detail: `${app} (${r.ruleType || r.type || 'app'}${r._acts.length ? '; actions ' + r._acts.slice(0, 4).join(', ') : ''})` }],
   { ranked: rankOn(snap), blockRe: /BLOCK/, allowRe: /ALLOW/, defaultReason: `no Cloud App Control rule for ${app}` });
-  const partial = out.decidingRule && /ALLOW/.test(out.decidingRule.action) ? arr((rel.find((r) => r.id === out.decidingRule.id) || {})._acts).filter((a) => /DENY|BLOCK/i.test(a)) : [];
+  const srcOf = (e) => rel.find((r) => String(r.id) === String(e.id)) || {};
+  for (const e of out.rules) e.cascading = srcOf(e).cascadingEnabled === true;
+  if (out.decidingRule) out.cascading = out.decidingRule.cascading;
+  const partial = out.decidingRule && /ALLOW/.test(out.decidingRule.action) ? arr(srcOf(out.decidingRule)._acts).filter((a) => cacKind(a) === 'BLOCK') : [];
   if (partial.length) out.note = `Allowed, but restricts: ${partial.join(', ')}`;
   return out;
 }
@@ -1143,12 +1224,15 @@ function simulate(snap, ctx, manual = {}) {
   const data = snap.data || snap;
   // custom URL categories -> add matching ids to ctx.categories
   const cats = new Set((ctx.categories || []).map(String));
+  const urlText = ctx.target ? lc(`${ctx.target.host}${ctx.target.path || ''}`) : '';
   for (const c of arr(data.customUrlCategories)) {
     const ents = [...arr(c.urls), ...arr(c.dbCategorizedUrls)];
-    const ips = arr(c.ipRanges);
+    const ips = [...arr(c.ipRanges), ...arr(c.ipRangesRetainingParentCategory)];
+    const kws = [...arr(c.keywords), ...arr(c.keywordsRetainingParentCategory)].map(lc).filter(Boolean);
     let hit = false;
     if (ctx.target) {
       if (!ctx.target.isIp && M.domainInList(ctx.target, ents).rel === 'match') hit = true;
+      if (!ctx.target.isIp && kws.some((k) => urlText.includes(k))) hit = true; // keywords match anywhere in the URL
       const ipsToTest = ctx.target.isIp ? [ctx.target.host] : ctx.resolvedIps || [];
       const ipList = [...ips, ...ents.filter((u) => M.parseIpRange(u))]; // IPs may be listed as custom URLs too
       for (const ip of ipsToTest) if (M.ipInList(ip, ipList).rel === 'match') hit = true;
@@ -1176,6 +1260,9 @@ function simulate(snap, ctx, manual = {}) {
   }
   const fwd = workload ? mConnectorForwarding(data, c2) : mForwarding(data, c2, manual);
   const ssl = web ? mSsl(data, c2) : na('SSL Inspection');
+  // What the web policies see: decrypted HTTPS, or an undecrypted SSL/TLS session (null = unknown / not HTTPS).
+  const httpsTx = web && !((c2.target && c2.target.scheme === 'http') || c2.port === 80);
+  c2.sslDecrypted = !httpsTx ? undefined : ssl.verdict === 'DECRYPTED' ? (ssl.confidence === 'definite' ? true : null) : ssl.verdict === 'NOT_DECRYPTED' ? (ssl.confidence === 'definite' ? false : null) : (arr(data.sslRules).length ? null : undefined);
   // Derive the request method the proxy would evaluate, unless the user supplied one.
   if (!c2.method && web) {
     const t = c2.target;
@@ -1194,18 +1281,35 @@ function simulate(snap, ctx, manual = {}) {
     else if (!(zpa.matchedSegments || []).length) zpa = Object.assign({}, zpa, { verdict: 'BLOCK', confidence: 'definite', decidingRule: null, couldOverride: [],
       reason: `The connector forwards this to ZPA, but the destination isn't in any ZPA application segment, so the connection fails` });
   }
+  // SSL "Do Not Inspect" with "Bypass Other Policies": the other web policies are not applied at all.
+  const sslBypass = web && ssl.bypassOtherPolicies && ssl.confidence === 'definite';
+  const bypassed = (module) => naNoDest(module, `Not applied: SSL Inspection rule "${ssl.decidingRule.name}" is Do Not Inspect with "Bypass Other Policies", so ${module} doesn't apply to this transaction`);
+  const webMod = (module, fn) => (!web ? na(module) : sslBypass ? bypassed(module) : fn(data, c2));
+  // Cloud App Control is evaluated before URL Filtering. A Cloud App Control rule that allows the app ends policy
+  // evaluation for URL Filtering unless that rule has "Cascade to URL Filtering" (cascadingEnabled) turned on.
+  const cac = webMod('Cloud App Control', mCloudApp);
+  let url;
+  const cacAllow = cac.decidingRule && cac.verdict === 'ALLOW' && cac.confidence === 'definite';
+  if (cacAllow && !cac.cascading) url = naNoDest('URL Filtering', `Not applied: Cloud App Control rule "${cac.decidingRule.name}" allows ${c2.cloudApp} and doesn't cascade to URL Filtering`);
+  else url = webMod('URL Filtering', mUrlFiltering);
+  // A Cloud App Control allow rule that depends on context (e.g. a group the user may be in) would stop URL Filtering.
+  if (!cacAllow && url.verdict !== 'N/A') {
+    const maybe = (cac.rules || []).filter((e) => e.status === 'unknown' && e.action === 'ALLOW' && !e.cascading);
+    if (maybe.length && ['BLOCK', 'CAUTION', 'ISOLATE'].includes(url.verdict)) url.couldOverride = [...(url.couldOverride || []), ...maybe.map((e) => Object.assign({}, e, { name: `${e.name} (Cloud App Control)` }))];
+  }
+  if (cacAllow && cac.cascading && url.verdict !== 'N/A') url.note = [url.note, `Cloud App Control rule "${cac.decidingRule.name}" allowed the app and cascades to URL Filtering, so this policy still applies.`].filter(Boolean).join(' ');
   const modules = [
     ...(zpa ? [zpa] : []),
     fwd,
     ssl,
-    web ? mAtp(data, c2) : na('Advanced Threat Protection'),
+    webMod('Advanced Threat Protection', mAtp),
     mFirewall(data, c2),
     hasHost ? mDns(data, c2) : naNoDest('DNS Control', c2.target ? 'Not applicable: destination is an IP address (no DNS lookup)' : 'Not evaluated: no destination host entered'),
-    web ? mUrlFiltering(data, c2) : na('URL Filtering'),
-    web ? mCloudApp(data, c2) : na('Cloud App Control'),
-    web ? mSandbox(data, c2) : na('Sandbox (Behavioral Analysis)'),
-    web ? mFileType(data, c2) : na('File Type Control'),
-    web ? mDlp(data, c2) : na('Data Loss Prevention'),
+    cac,
+    url,
+    webMod('Sandbox (Behavioral Analysis)', mSandbox),
+    webMod('File Type Control', mFileType),
+    webMod('Data Loss Prevention', mDlp),
   ];
   // A policy set that failed to load (timeout, permission, …) must not look like "no rule matched → default action".
   const errs = (snap && snap.errors) || {};
@@ -1303,7 +1407,14 @@ function summarize(modules, ctx = {}) {
     if (finalIdx >= 0) { const m = pipeline[finalIdx]; zia = pick(m, m.verdict); lines.push(`${m.verdict === 'BLOCK' ? 'Blocked' : m.verdict === 'ISOLATE' ? 'Isolated' : 'Cautioned'} by ${label(m)}`); }
     else {
       const url = by['URL Filtering'];
-      zia = url && !['N/A', 'NOT_EVALUATED'].includes(url.verdict) ? pick(url, 'ALLOW') : (pipeline[0] ? pick(pipeline.find((m) => m.module === 'Firewall') || pipeline[0], 'ALLOW') : { module: 'ZIA', action: 'ALLOW', rule: null, criteria: [], reason: 'No ZIA module applies' });
+      // The allow comes from the most specific web policy that decided: URL Filtering, else a Cloud App Control allow
+      // (which stops URL Filtering), else an SSL "Bypass Other Policies" rule, else the firewall.
+      const cacM = by['Cloud App Control'];
+      const ok = (m) => m && !['N/A', 'NOT_EVALUATED'].includes(m.verdict);
+      zia = ok(url) ? pick(url, 'ALLOW')
+        : cacM && cacM.decidingRule && ok(cacM) ? pick(cacM, 'ALLOW')
+          : ssl && ssl.bypassOtherPolicies && ssl.decidingRule ? pick(ssl, 'ALLOW')
+            : (pipeline[0] ? pick(pipeline.find((m) => m.module === 'Firewall') || pipeline[0], 'ALLOW') : { module: 'ZIA', action: 'ALLOW', rule: null, criteria: [], reason: 'No ZIA module applies' });
       for (const m of pipeline) {
         if (m.module === 'Data Loss Prevention' && m.verdict !== 'ALLOW') continue;
         allowedBy.push({ module: m.module, rule: m.decidingRule ? m.decidingRule.name : null, order: m.decidingRule ? m.decidingRule.order : null, action: m.decidingRule ? m.decidingRule.action : m.verdict, reason: m.reason, confidence: m.confidence });
@@ -1325,8 +1436,11 @@ function summarize(modules, ctx = {}) {
   const tags = [];
   if (ssl && ssl.verdict === 'NOT_DECRYPTED' && zia.action !== 'BLOCK') tags.push({ tag: 'NOT_INSPECTED', text: `SSL not decrypted — rule "${ssl.decidingRule && ssl.decidingRule.name}"` });
   const sslHidden = ssl && ssl.verdict === 'NOT_DECRYPTED' && !((ctx.target && ctx.target.scheme === 'http') || ctx.port === 80);
-  if (!sslHidden && zia.action !== 'BLOCK' && ((dlp && (dlp.candidates || []).length) || (sandbox && sandbox.decidingRule && !/BLOCK/.test(sandbox.decidingRule.action || ''))))
-    tags.push({ tag: 'INSPECT_ONLY', text: [dlp && (dlp.candidates || []).length ? 'DLP scans content' : null, sandbox && sandbox.decidingRule && !/BLOCK/.test(sandbox.decidingRule.action || '') ? `sandbox rule "${sandbox.decidingRule.name}"` : null].filter(Boolean).join(' · ') });
+  const sbx = sandbox && sandbox.decidingRule && ['SCAN', 'QUARANTINE'].includes(sandbox.verdict) ? sandbox : null;
+  if (!sslHidden && zia.action !== 'BLOCK' && ((dlp && (dlp.candidates || []).length) || sbx))
+    tags.push({ tag: 'INSPECT_ONLY', text: [dlp && (dlp.candidates || []).length ? 'DLP scans content' : null, sbx ? `sandbox rule "${sbx.decidingRule.name}"${sbx.verdict === 'QUARANTINE' ? ' holds the first download until it is analysed' : ' analyses the file'}` : null].filter(Boolean).join(' · ') });
+  if (!sslHidden && sbx && sbx.ifMalicious === 'BLOCK' && zia.action !== 'BLOCK' && !zpaDecides)
+    alsoBasedOn.push({ kind: 'content', condition: 'If the sandbox finds the file malicious', action: 'BLOCK', module: sbx.module, rule: sbx.decidingRule.name, order: sbx.decidingRule.order });
 
   // Forwarding decides whether ZIA sees it at all
   let primary;

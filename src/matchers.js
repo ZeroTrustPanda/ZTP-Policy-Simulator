@@ -15,8 +15,20 @@ function ipToInt(ip) {
 }
 const isIPv4 = (s) => ipToInt(s) !== null;
 
-// Parse "1.2.3.4", "1.2.3.0/24", "1.2.3.1-1.2.3.9" -> [lo, hi] or null
+// Parse "1.2.3.4", "1.2.3.0/24", "1.2.3.1-1.2.3.9" -> [lo, hi] or null.
+// Memoised: rule lists (e.g. a 1,000-entry block list) are re-checked for every row of a bulk run.
+const RANGE_CACHE = new Map();
 function parseIpRange(s) {
+  const k = typeof s === 'string' ? s : String(s);
+  const hit = RANGE_CACHE.get(k);
+  if (hit !== undefined) return hit;
+  const v = parseIpRangeRaw(k);
+  if (v) Object.freeze(v); // shared between callers: never mutated
+  if (RANGE_CACHE.size > 200000) RANGE_CACHE.clear();
+  RANGE_CACHE.set(k, v);
+  return v;
+}
+function parseIpRangeRaw(s) {
   s = String(s).trim();
   if (!s) return null;
   if (s.includes('/')) {
@@ -96,27 +108,30 @@ function globToRegex(g) {
   return new RegExp('^' + g.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
 }
 
-// Zscaler URL entry semantics: "example.com" and ".example.com" match the domain and all subdomains.
-// "*.example.com" accepted too. A pattern with a path only matches when the target path starts with it.
+// Zscaler URL entry semantics (custom URL categories, ATP lists, firewall FQDNs):
+//   "example.com"   matches the host example.com only (any path), NOT www.example.com;
+//   ".example.com"  (or "*.example.com") matches example.com and every subdomain.
+// A pattern with a path only matches when the target path starts with it.
 // relation: 'match' | 'partial' (query is a wildcard that overlaps, or rule is narrower than query) | 'none'
 function domainRelation(target, pattern) {
   const t = typeof target === 'string' ? parseTarget(target) : target;
   if (!t) return 'none';
   const { host: ph, path: pp } = normPattern(pattern);
   if (!ph) return 'none';
+  const sub = /^\*?\./.test(ph); // leading dot / "*." covers subdomains
   const base = ph.replace(/^\*\./, '').replace(/^\./, '');
   const hasGlob = base.includes('*');
   const th = t.host;
   const tbase = th.replace(/^\*\./, '');
   let hostRel = 'none';
   if (!t.isWildcard) {
-    if (hasGlob) { if (globToRegex(base).test(th) || globToRegex('*.' + base).test(th)) hostRel = 'match'; }
-    else if (th === base || th.endsWith('.' + base)) hostRel = 'match';
+    if (hasGlob) { if (globToRegex(base).test(th) || (sub && globToRegex('*.' + base).test(th))) hostRel = 'match'; }
+    else if (th === base || (sub && th.endsWith('.' + base))) hostRel = 'match';
   } else {
-    // Query is a wildcard like *.google.com: rule covers query if query base is within rule base.
-    if (!hasGlob && (tbase === base || tbase.endsWith('.' + base))) hostRel = 'match';
-    // Rule is narrower (e.g. mail.google.com inside *.google.com) -> partial overlap
-    else if (!hasGlob && base.endsWith('.' + tbase)) hostRel = 'partial';
+    // Query is a wildcard like *.google.com (the domain and its subdomains).
+    if (!hasGlob && sub && (tbase === base || tbase.endsWith('.' + base))) hostRel = 'match';
+    // Rule is narrower (a host inside the queried domain, or only the apex) -> partial overlap
+    else if (!hasGlob && (base === tbase || base.endsWith('.' + tbase))) hostRel = 'partial';
     else if (hasGlob && (globToRegex(base).test(tbase) || globToRegex(tbase.replace(/\*/g, 'x')).test(base))) hostRel = 'partial';
   }
   if (hostRel === 'none') return 'none';
