@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Finds this machine's Zscaler root CA (if Zscaler Client Connector is
 # running) and wires it into Docker two ways:
-#   1. Copies it to docker/zscaler-ca.crt, which the Dockerfile trusts at
-#      build time so `npm ci` can reach the registry through this
-#      machine's proxy.
+#   1. Copies it to docker/zscaler-ca.crt (gitignored — never commit it).
+#      The Dockerfile trusts that file only in the dependency-install
+#      stage so `npm ci` can reach the registry through this machine's
+#      proxy. The file is not copied into the published image.
 #   2. Records its live path in .env as ZSCALER_CERT_PATH, which
 #      docker-compose.yml bind-mounts into the running container so the
 #      app's own runtime HTTPS calls (OAuth, api.zsapi.net, PAC fetches)

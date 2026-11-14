@@ -1,0 +1,51 @@
+# Node 20 matches the Dockerfile (node:20-slim) and the pkg targets in
+# package.json. package.json does not set engines.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: npm test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  docker:
+    name: docker build without a Zscaler cert
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with no cert file present
+        run: |
+          rm -f docker/zscaler-ca.crt
+          test ! -e docker/zscaler-ca.crt
+          docker build --progress=plain --load -t ztp-policy-simulator:ci .
+      - name: Final image has no build-time cert
+        run: |
+          docker run --rm --entrypoint bash ztp-policy-simulator:ci -c '
+            if [ -s /usr/local/share/ca-certificates/zscaler-ca.crt ]; then
+              echo "build-time cert is in the final image" >&2
+              exit 1
+            fi
+            if [ -e /tmp/docker-src ]; then
+              echo "docker source copy is in the final image" >&2
+              exit 1
+            fi
+            test -x /usr/local/bin/entrypoint.sh
+            test -d /app/node_modules/express
+            node -e "require(\"express\")"
+          '

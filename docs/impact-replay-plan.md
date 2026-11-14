@@ -44,8 +44,8 @@ Web Insights export layout (verified against a real export): 2 preamble lines, h
 - Volume: generated 1M-row synthetic stream to check memory/time budget (run manually, not in CI).
 
 ## Docker / Zscaler cert check
-- Detection exists (`scripts/detect-zscaler-cert.sh`) and build/runtime trust works (`Dockerfile` COPY + `update-ca-certificates`, `docker/entrypoint.sh` runtime mount).
-- **Gap 1:** `docker/zscaler-ca.crt` is **committed to git with a real Zscaler Root CA** (commit c1f49b6) and isn't in `.gitignore`. Rule says the cert stays out of git. Fix: commit an empty placeholder, `.gitignore` the populated file (or `git update-index --skip-worktree`), or generate it outside the repo.
-- **Gap 2:** the build-time cert is `COPY`'d into `/usr/local/share/ca-certificates` and stays in the final image. Rule says out of the image. Fix: multi-stage build (trust cert only in the `npm ci` stage, copy `node_modules` to a clean final stage); runtime trust stays via the bind mount.
-- Neither is changed in this PR; suggest a small separate PR.
-- **No CI**: the repo has no `.github/workflows`. Suggest adding a `npm test` workflow.
+Fixed. Detection (`scripts/detect-zscaler-cert.sh`) still writes a local build-time CA to `docker/zscaler-ca.crt` when Zscaler Client Connector or a Zscaler cert is present, and records the live path for the runtime bind mount. Machines without Zscaler get an empty file and build and run with the default trust store.
+
+- **Gap 1 (fixed):** the real Zscaler Root CA is removed from the tree (`git rm --cached docker/zscaler-ca.crt`). `docker/zscaler-ca.crt` is listed in `.gitignore`. The detector still writes that path locally, outside git. The Dockerfile copies the `docker/` directory and trusts the file only when it is non-empty, so a missing or empty file still builds. History was not rewritten: commit c1f49b6 still contains that public root CA (a public CA, not a private key).
+- **Gap 2 (fixed):** multi-stage `Dockerfile`. The `deps` stage trusts the cert only for `npm ci`. The `final` stage copies `node_modules` and the app onto a clean `node:20-slim` image with no Zscaler cert. Runtime trust stays the `docker/entrypoint.sh` bind mount (`ZSCALER_CERT_PATH`, default `docker/empty-ca.crt`).
+- **CI:** `.github/workflows/ci.yml` runs `npm ci` and `npm test` on pull requests and on pushes to `main`, on Node 20 (the `node:20-slim` image and the `pkg` node20 targets; `package.json` has no `engines` field). The same workflow runs `docker build` with no cert file present.
