@@ -4,4 +4,7 @@ dist/
 .DS_Store
 snapshots/
 .env
+# Local build-time TLS-inspection CA written by scripts/detect-zscaler-cert.sh.
+# Never commit a populated cert. A missing or empty file is a valid build.
+docker/zscaler-ca.crt
 docker/zscaler-ca.macos.crt

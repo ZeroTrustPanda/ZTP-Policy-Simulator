@@ -2,9 +2,9 @@
 # Trusts a Zscaler (or other TLS-inspecting proxy) root CA mounted at
 # container start, before handing off to the real command. This covers
 # the app's own runtime HTTPS calls (OAuth token requests, api.zsapi.net,
-# PAC fetches) on whichever customer site the container is run at — the
-# cert baked in at build time (if any) is a different, possibly stale,
-# machine's cert and isn't enough on its own.
+# PAC fetches) on whichever customer site the container is run at.
+# The image does not include a build-time CA; that trust exists only
+# while dependencies are installed and is left behind in the deps stage.
 set -euo pipefail
 
 RUNTIME_CERT=/usr/local/share/ca-certificates/zscaler-runtime-ca.crt
