@@ -1,6 +1,6 @@
 # 🐼 ZeroTrustPanda ZS Policy Simulator
 
-**Downloads (v1.8.7):** [Windows x64](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.7/ZTP-Policy-Simulator-1.8.7-windows-x64.zip) · [macOS Apple Silicon](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.7/ZTP-Policy-Simulator-1.8.7-macos-arm64.zip) · [macOS Intel](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.7/ZTP-Policy-Simulator-1.8.7-macos-x64.zip) · [SHA256SUMS](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.7/SHA256SUMS.txt) — all builds in [`downloads/`](downloads/). Release notes: [RELEASE_NOTES.md](RELEASE_NOTES.md) · history: [CHANGELOG.md](CHANGELOG.md)
+**Downloads (v1.8.8):** [Windows x64](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.8/ZTP-Policy-Simulator-1.8.8-windows-x64.zip) · [macOS Apple Silicon](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.8/ZTP-Policy-Simulator-1.8.8-macos-arm64.zip) · [macOS Intel](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.8/ZTP-Policy-Simulator-1.8.8-macos-x64.zip) · [SHA256SUMS](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.8/SHA256SUMS.txt) — all builds in [`downloads/`](downloads/). Release notes: [RELEASE_NOTES.md](RELEASE_NOTES.md) · history: [CHANGELOG.md](CHANGELOG.md)
 
 Standalone tool that answers "would this be allowed, blocked or bypassed — and by what?" against your live Zscaler policy. Same look as the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustPanda/ZTP-Policy-Wizard).
 
@@ -14,9 +14,16 @@ Two tiles at the top:
 - **Policy rule action** — what happens for anyone your inputs don't narrow down: **Block · Allow · Bypass · Isolate · Caution**, the module and rule that decides it (with order), and tags: **Not inspected** (SSL Do Not Decrypt) and **Inspect only** (DLP / sandbox scan content). "Why this rule matched" and "Rule that decided in each module" expand underneath.
 - **Policy action also based on** — every condition that would change that action, each with its own action and rule: 👥 user / group / department, 📍 location, ⏱ time window / device trust / other rule conditions, 💻 Client Connector app profile + network type (bypasses), 📄 uploaded content (DLP), ✏️ inputs you haven't entered. Top 3 shown, the rest under "Show more". For a bypassed result it shows what ZIA would do if the traffic were forwarded.
 
+Results are split into three tabs: **📋 Result** (the tiles and "How it gets there"), **🧭 Decision path** and **🧩 Every module**.
+- **Decision path:**
+  - a flowchart of every policy in evaluation order, with the deciding step outlined, later steps marked *not reached* and skipped policies collapsed;
+  - dashed branches for the conditions that would change the result;
+  - the result with "would change if…", what was simulated, and a step-by-step list of each policy's rules and criteria (click a box to open its step);
+  - download the flowchart as SVG or PNG.
+
 Below the tiles:
 - **How it gets there** — every Client Connector app profile, one row each, per network type: forwarding action, IPv4 / domain inclusions and exclusions, VPN gateway bypasses, IP-based app bypasses, PAC files (evaluated with FindProxyForURL).
-- **Every module** — firewall, DNS, SSL, ATP, URL filtering, file type, sandbox, DLP, ZPA, with all evaluated rules on click.
+- **Every module** (own tab) — firewall, DNS, SSL, ATP, URL filtering, file type, sandbox, DLP, ZPA, with all evaluated rules on click.
 
 Smart defaults: port from the URL scheme (hostnames assume HTTPS/443), network service/application inferred from protocol+port (UDP/443 → QUIC), request method GET (CONNECT when not decrypted), file type from the URL path, standard DNS resolver for DNS app rules. Every assumption is stated on the result and can be overridden.
 

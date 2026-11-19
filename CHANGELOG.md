@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.8 — 2026-11-19
+- New **Decision path** tab on every result (Result | Decision path | Every module): a flowchart of each policy in evaluation order, the deciding step highlighted, later steps marked "not reached", skipped policies collapsed, and dashed branches for conditions that would change the result. Download as SVG or PNG.
+- The tab also shows the result with "would change if…", what was simulated (destination, port, user/groups, categories and their source, cloud app, resolved IPs, device), and a step-by-step list with each policy's deciding rule, criteria, rules that depend on missing context, and all evaluated rules. Clicking a flowchart box opens its step.
+- New "Cloud app (override lookup)" field, so Cloud App Control and SSL cloud-app rules can be tested offline or against an opened snapshot.
+- Cloud App Control conditions that would stop URL Filtering are labelled Cloud App Control; clearer Cloud App Control reason when its rules depend on context.
+
 ## 1.8.7 — 2026-11-12
 - Full-policy validation against a customer export (URL Filtering, Cloud App Control, SSL, Sandbox, DNS, Firewall, ATP): 16 evaluation fixes.
 - Cloud App Control: block/deny action enums (BLOCK_*_APPS, DENY_*_USE, BLOCK_CHAT, BLOCK_*_VIEW) block; evaluated before URL Filtering; an allow without "Cascade to URL Filtering" stops URL Filtering; upload-only restrictions apply to uploads.

@@ -1063,6 +1063,8 @@ function mCloudApp(snap, ctx) {
   const srcOf = (e) => rel.find((r) => String(r.id) === String(e.id)) || {};
   for (const e of out.rules) e.cascading = srcOf(e).cascadingEnabled === true;
   if (out.decidingRule) out.cascading = out.decidingRule.cascading;
+  const pending = out.rules.filter((e) => e.status === 'unknown').length;
+  if (!out.decidingRule && pending) out.reason = `No Cloud App Control rule definitely applies to ${app}; ${pending} rule(s) depend on context you didn't enter`;
   const partial = out.decidingRule && /ALLOW/.test(out.decidingRule.action) ? arr(srcOf(out.decidingRule)._acts).filter((a) => cacKind(a) === 'BLOCK') : [];
   if (partial.length) out.note = `Allowed, but restricts: ${partial.join(', ')}`;
   return out;

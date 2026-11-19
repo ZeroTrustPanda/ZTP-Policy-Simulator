@@ -1,4 +1,4 @@
-# ZeroTrustPanda ZS Policy Simulator v1.8.7
+# ZeroTrustPanda ZS Policy Simulator v1.8.8
 
 **Would this be allowed, blocked or bypassed — and by what?** A standalone simulator that pulls your live Zscaler policy over OneAPI and evaluates a transaction across ZIA, ZPA, Client Connector and Cloud & Branch Connector the way the cloud would, in rule order, then shows the deciding rule and everything else that could change the outcome.
 
@@ -7,12 +7,12 @@ Companion to the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustP
 ## Downloads
 | Platform | File |
 |---|---|
-| Windows x64 | [ZTP-Policy-Simulator-1.8.7-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.7/ZTP-Policy-Simulator-1.8.7-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
-| macOS Apple Silicon | [ZTP-Policy-Simulator-1.8.7-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.7/ZTP-Policy-Simulator-1.8.7-macos-arm64.zip) |
-| macOS Intel | [ZTP-Policy-Simulator-1.8.7-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.7/ZTP-Policy-Simulator-1.8.7-macos-x64.zip) |
+| Windows x64 | [ZTP-Policy-Simulator-1.8.8-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.8/ZTP-Policy-Simulator-1.8.8-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
+| macOS Apple Silicon | [ZTP-Policy-Simulator-1.8.8-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.8/ZTP-Policy-Simulator-1.8.8-macos-arm64.zip) |
+| macOS Intel | [ZTP-Policy-Simulator-1.8.8-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.8/ZTP-Policy-Simulator-1.8.8-macos-x64.zip) |
 | Source | clone the repo, or GitHub's "Source code" download on the release |
 
-Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.7/SHA256SUMS.txt)
+Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.8/SHA256SUMS.txt)
 
 No install, no Node.js required. Run it and it opens `http://127.0.0.1:8787`.
 macOS builds are unsigned — before first run: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`.
@@ -111,6 +111,17 @@ Port from the URL scheme (hostnames assume HTTPS/443) · network service and app
 - No per-transaction log lookup: the console's transaction-log endpoints refuse API-client tokens. Use the console's Web / Firewall Insights logs for per-transaction proof.
 - ZCC field names follow the shapes verified by the Policy Wizard; report any app profile that shows "no forwarding profile linked".
 - Zscaler-managed categories whose members the API doesn't return (e.g. *Zscaler Recommended Exemptions*, *Office 365* as a URL category) match only when the URL lookup returns them; rules on them may show as not matching for those destinations.
+
+## Changes in 1.8.8
+**🧭 Decision path tab.** Every result now has three tabs: **Result**, **Decision path** and **Every module**.
+- **Flowchart.** It shows each policy in the order ZIA evaluates it, from forwarding (Client Connector/PAC) through SSL Inspection, ATP, Firewall, DNS, Cloud App Control, URL Filtering, Sandbox, File Type Control and DLP. The colours show each outcome. The step that decides is outlined, and steps after a block are faded and marked *not reached*. Policies that don't apply are collapsed into one "Skipped" line. Dashed branches show conditions that would change the result, e.g. *if group Nurses → Allow*.
+- **Result and "would change if…"**, plus **what was simulated**: destination, protocol/port, user and groups, URL categories and where they came from, cloud app, resolved IPs and device.
+- **Step by step.** Each policy's deciding rule and why it matched, rules that depend on context you didn't enter, rules that also match, and every evaluated rule. Clicking a box in the flowchart opens its step.
+- **Download** the flowchart as SVG or PNG for an email or a slide.
+
+**Also**
+- New **Cloud app (override lookup)** field, next to URL categories. It lets you test Cloud App Control and SSL cloud-app rules offline or against an opened snapshot.
+- Cloud App Control conditions are labelled with the right policy. When its rules depend on missing context, Cloud App Control now says so instead of "no rule".
 
 ## Changes in 1.8.7
 We ran a customer's complete exported policy through the simulator, module by module. That covered URL Filtering, Cloud App Control, SSL Inspection, Sandbox, DNS Control, Firewall and Advanced Threat Protection. Each result was checked against how ZIA evaluates the policy. The fixes below are the result. The new `semantics` tests cover each one with synthetic data.

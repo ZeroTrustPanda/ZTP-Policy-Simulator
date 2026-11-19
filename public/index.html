@@ -163,6 +163,18 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 12
 .seg button { background: none; border: none; color: var(--text-secondary); font: inherit; font-size: 13px; font-weight: 500; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
 .seg button:hover { color: var(--text-primary); }
 .seg button.on { background: var(--accent-blue-dim); color: #bfdbfe; }
+.rtabs { margin-bottom: 1rem; }
+.dp-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; align-items: stretch; }
+.dp-grid > .card { margin-bottom: 1.25rem; }
+@media (max-width: 1000px) { .dp-grid { grid-template-columns: 1fr; } }
+.dp-card .dp-wrap svg { max-width: 980px; display: block; margin: 0 auto; }
+.dp-kvs { display: grid; gap: 6px; }
+.dp-kv { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px; font-size: 13px; } .dp-kv span { color: var(--text-secondary); } .dp-kv b { font-weight: 500; word-break: break-word; }
+.dp-result.BLOCK { border-color: var(--accent-red); } .dp-result.ALLOW { border-color: var(--accent-green); } .dp-result.CAUTION { border-color: var(--accent-amber); } .dp-result.ISOLATE { border-color: var(--accent-cyan); }
+.dp-skip { font-size: 12.5px; color: var(--text-secondary); padding: 8px 12px; margin-bottom: 6px; border: 1px dashed var(--border); border-radius: var(--radius); }
+.dp-step.flash { box-shadow: 0 0 0 2px var(--accent-blue); transition: box-shadow .3s; }
+.dp-node.sel rect:first-of-type { stroke: #e8ecf4; stroke-width: 3; }
+.dp-node:hover rect:first-of-type { stroke-width: 3; }
 .drop { border: 1.5px dashed var(--border); border-radius: var(--radius); padding: 20px; text-align: center; background: var(--bg-input); transition: all .15s; }
 .drop.over { border-color: var(--accent-blue); background: rgba(59,130,246,.08); }
 .drop-main { font-size: 14px; font-weight: 500; margin-bottom: 4px; }
@@ -1059,40 +1071,69 @@ function compareView(j) {
     <table class="cmp"><tr><th style="width:24%">Module</th><th>${head(A)}</th><th>${head(B)}</th></tr>${rows}</table>${full(A)}${full(B)}</div>`;
 }
 
-// ---------- result layout: decision path shown inline (under the action tiles) or as its own tab ----------
-// View preference: ?pathView=inline|tab in the URL wins (for testing), else the user's last choice, else inline.
-function pathView() {
-  const q = new URLSearchParams(location.search).get('pathView');
-  if (q === 'inline' || q === 'tab') return q;
-  try { return localStorage.getItem('ztpPathView') === 'tab' ? 'tab' : 'inline'; } catch { return 'inline'; }
-}
-function setPathView(v) { try { localStorage.setItem('ztpPathView', v); } catch {} if (lastSim && lastSim.result) $('simOut').innerHTML = renderSimResult(lastSim.result); }
+// ---------- result layout: tabs — Result | Decision path | Every module ----------
 function renderSimResult(j) {
   const s = j.summary, c = j.context;
   window.dpResult = j;
   const head = incompleteBox(s)
     + (j.pick ? `<div class="form-hint" style="margin-bottom:8px">Simulated as ${j.pick.kind === 'user' ? '👤' : '👥'} <b>${esc(pickLabel(j.pick))}</b>. Add a second user or group to compare.</div>` : '');
   const tiles = `<div class="tiles">${actionTile(s, c, j.modules)}${basedOnTile(s, c)}</div>`;
-  const path = window.DecisionPath ? DecisionPath.card(j) : '';
   const rest = changeCard(s, c, j.modules) + forwardingCard(j.modules.find((m) => m.module.startsWith('Forwarding')), s);
-  const mods = modulesCard(j.modules, s);
-  const v = pathView();
-  const toggle = `<div class="seg" style="margin-bottom:12px"><button class="${v === 'inline' ? 'on' : ''}" onclick="setPathView('inline')">Path inline</button><button class="${v === 'tab' ? 'on' : ''}" onclick="setPathView('tab')">Path as tab</button></div>`;
-  if (v === 'inline') return head + toggle + tiles + path + rest + mods;
   const tab = (id, label, on) => `<button class="${on ? 'on' : ''}" data-rtab="${id}">${label}</button>`;
-  return head + toggle + `<div class="seg rtabs">${tab('sum', '📋 Result', true)}${tab('path', '🧭 Decision path', false)}${tab('mods', '🧩 Every module', false)}</div>`
-    + `<div data-rpane="sum">${tiles}${rest}</div><div data-rpane="path" class="hidden">${path}</div><div data-rpane="mods" class="hidden">${mods}</div>`;
+  return head + `<div class="seg rtabs">${tab('sum', '📋 Result', true)}${tab('path', '🧭 Decision path', false)}${tab('mods', '🧩 Every module', false)}</div>`
+    + `<div data-rpane="sum">${tiles}${rest}</div><div data-rpane="path" class="hidden">${pathTab(j)}</div><div data-rpane="mods" class="hidden">${modulesCard(j.modules, s)}</div>`;
+}
+// Decision path tab: the flowchart, what was simulated, and every step with its rules, criteria and conditions.
+function pathTab(j) {
+  if (!window.DecisionPath) return '<div class="card">Decision path unavailable.</div>';
+  const s = j.summary, c = j.context, p = s.primary || {};
+  const steps = DecisionPath.steps(j);
+  const conds = (s.alsoBasedOn || []).filter((x) => !(x.kind === 'zpa' && /check fails/.test(x.condition)));
+  const condRow = (x) => `<div class="cond"><span class="ci">${KIND_ICON[x.kind] || '•'}</span><div><div class="ct">${esc(x.condition)}</div><div class="cr">${x.rule ? `rule "${esc(x.rule)}"${x.order != null && x.order >= 0 ? ' · order ' + esc(x.order) : ''} · ${esc(x.module)}` : esc(x.detail || x.module || '')}</div></div><div class="ca">→ ${actBadge(x.action)}</div></div>`;
+  // What was simulated
+  const kv = (k, v) => (v == null || v === '' || (Array.isArray(v) && !v.length) ? '' : `<div class="dp-kv"><span>${esc(k)}</span><b>${esc(Array.isArray(v) ? v.join(', ') : v)}</b></div>`);
+  const who = c.source === 'workload' ? `workload ${c.sourceIp || ''}` : c.user || ((c.groups || []).length ? 'group ' + c.groups.join(', ') : 'any user (none entered)');
+  const tx = `<div class="card"><div class="card-header"><h3>What was simulated</h3></div><div class="dp-kvs">
+    ${kv('Destination', c.target ? c.target.raw || c.target.host : 'any')}${kv('Protocol / port', c.port != null ? `${String(c.protocol || 'tcp').toUpperCase()}/${c.port}` : '')}
+    ${kv('Who', who)}${kv('Groups', c.user ? c.groups : [])}${kv('Department', c.department)}${kv('Location', c.location)}${kv('Source IP', c.sourceIp)}
+    ${kv('URL categories', c.categories)}${kv('Category source', c.categorySource)}${kv('Cloud app', c.cloudApp)}${kv('Resolved IPs', c.resolvedIps)}
+    ${kv('File type', c.fileType ? `${c.fileType}${c.operation ? ' · ' + c.operation : ''}` : '')}${kv('Method', c.method)}${kv('Device', c.device ? `${c.device.hostname || c.device.udid} · ${c.device.os || ''}` : '')}
+    ${kv('Admin ranking', c.adminRanking ? 'on' : '')}</div>
+    ${(c.notes || []).length ? `<details class="lk-details"><summary>Lookup notes (${c.notes.length})</summary>${c.notes.map((n) => `<div class="form-hint">${esc(n)}</div>`).join('')}</details>` : ''}</div>`;
+  // Result + what would change it
+  const res = `<div class="card dp-result ${esc(p.action)}"><div class="card-header"><h3>${(ACT[p.action] || ['•'])[0]} ${esc(String(s.overall || '').replace(/_/g, ' '))} — ${esc(p.module || '')}</h3>
+    <p style="font-size:13px">${p.rule ? `Rule <b>${esc(p.rule)}</b>${p.order != null && p.order >= 0 ? ` (order ${esc(p.order)}${s.rank && s.rank.on ? `, rank ${esc(s.rank.rank)}` : ''})` : ''}` : esc(p.reason || 'No rule matched — default action')}</p></div>
+    ${conds.length ? `<div class="t-title" style="margin-top:4px">Would change if…</div>${conds.map(condRow).join('')}` : '<div class="empty">Nothing else changes this result.</div>'}</div>`;
+  // Every step, in the order the flowchart draws them
+  let n = 0;
+  const stepHtml = steps.map((st) => {
+    if (st.kind === 'skipped') return `<div class="dp-skip">⤼ Skipped: ${st.names.map((x) => `<span title="${esc(x.why || '')}"><b>${esc(x.name)}</b>${x.why ? ` — ${esc(x.why)}` : ''}</span>`).join('<br>')}</div>`;
+    const m = j.modules.find((x) => x.module === st.module) || {};
+    const mine = conds.filter((x) => x.module === m.module);
+    const tagL = st.isDec ? '<span class="badge b-blue">decides</span>' : st.notReached ? '<span class="badge b-slate">not reached</span>' : '';
+    return `<div class="mod dp-step${st.isDec ? ' open' : ''}" data-step="${esc(m.module)}"><div class="hd" onclick="this.parentNode.classList.toggle('open')"><span class="name">${++n}. ${esc(m.module)}</span>${tagL}<span class="sub">${esc(m.decidingRule ? `rule "${m.decidingRule.name}"` : m.reason || '')}</span>${m.confidence && m.confidence !== 'definite' ? `<span class="badge b-purple">${esc(m.confidence)}</span>` : ''}${badgeFor(m.verdict)}</div>
+      <div class="bd"><div class="msg">${esc(m.reason || '')}</div>${m.note ? `<div class="note" style="margin-top:6px">${esc(m.note)}</div>` : ''}
+      ${st.notReached ? '<div class="form-hint">Not reached: an earlier policy already decided this transaction. Shown for reference.</div>' : ''}
+      ${m.decidingRule ? ruleBox(m.decidingRule, 'deciding') : ''}
+      ${(m.alsoMatched || []).length ? `<div class="multim" style="margin:8px 0"><div class="ph">🔀 Also match (first match wins, so these don't apply)</div>${mmList(m.alsoMatched)}</div>` : ''}
+      ${(m.couldOverride || []).length ? `<div class="t-title" style="margin-top:8px">Rules that depend on context you didn't enter</div>${m.couldOverride.map((r) => ruleBox(r, 'depends')).join('')}` : ''}
+      ${mine.length ? `<div class="t-title" style="margin-top:8px">Would change the result if…</div>${mine.map(condRow).join('')}` : ''}
+      ${(m.rules || []).length ? `<details><summary>All ${m.rules.length} evaluated rule(s) in this policy</summary>${m.rules.map((r) => ruleBox(r, r.status)).join('')}</details>` : ''}</div></div>`;
+  }).join('');
+  return `<div class="dp-grid">${res}${tx}</div>${DecisionPath.card(j)}
+    <div class="card"><div class="card-header"><h3>Step by step</h3><p style="font-size:13px">Each policy in evaluation order. Click a box in the flowchart, or a step here, for its rules and why they matched.</p></div>${stepHtml}</div>`;
 }
 function showResultTab(id) {
   document.querySelectorAll('[data-rtab]').forEach((b) => b.classList.toggle('on', b.dataset.rtab === id));
   document.querySelectorAll('[data-rpane]').forEach((p) => p.classList.toggle('hidden', p.dataset.rpane !== id));
 }
 document.addEventListener('click', (e) => { const b = e.target.closest('[data-rtab]'); if (b) showResultTab(b.dataset.rtab); });
-// Clicking a box in the decision path opens that module's rules.
+// Clicking a box in the flowchart opens that step's details below it (same tab) and highlights the box.
 window.dpShowModule = (name) => {
-  if (document.querySelector('[data-rpane]')) showResultTab('mods');
-  const m = [...document.querySelectorAll('#simOut .mod')].find((el) => (el.querySelector('.name') || {}).textContent === name);
-  if (m) { m.classList.add('open'); m.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  showResultTab('path');
+  document.querySelectorAll('#simOut .dp-node').forEach((n) => n.classList.toggle('sel', n.getAttribute('data-module') === name));
+  const m = [...document.querySelectorAll('#simOut .dp-step')].find((el) => el.dataset.step === name);
+  if (m) { m.classList.add('open'); m.scrollIntoView({ behavior: 'smooth', block: 'start' }); m.classList.add('flash'); setTimeout(() => m.classList.remove('flash'), 1200); }
 };
 $('btnSim').onclick = async () => {
   if (!sid || !loaded) { msg('simMsg', 'Connect and load policies first.'); return; }
