@@ -1,4 +1,4 @@
-# ZeroTrustPanda ZS Policy Simulator v1.8.8
+# ZeroTrustPanda ZS Policy Simulator v1.8.9
 
 **Would this be allowed, blocked or bypassed — and by what?** A standalone simulator that pulls your live Zscaler policy over OneAPI and evaluates a transaction across ZIA, ZPA, Client Connector and Cloud & Branch Connector the way the cloud would, in rule order, then shows the deciding rule and everything else that could change the outcome.
 
@@ -7,12 +7,12 @@ Companion to the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustP
 ## Downloads
 | Platform | File |
 |---|---|
-| Windows x64 | [ZTP-Policy-Simulator-1.8.8-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.8/ZTP-Policy-Simulator-1.8.8-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
-| macOS Apple Silicon | [ZTP-Policy-Simulator-1.8.8-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.8/ZTP-Policy-Simulator-1.8.8-macos-arm64.zip) |
-| macOS Intel | [ZTP-Policy-Simulator-1.8.8-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.8/ZTP-Policy-Simulator-1.8.8-macos-x64.zip) |
+| Windows x64 | [ZTP-Policy-Simulator-1.8.9-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.9/ZTP-Policy-Simulator-1.8.9-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
+| macOS Apple Silicon | [ZTP-Policy-Simulator-1.8.9-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.9/ZTP-Policy-Simulator-1.8.9-macos-arm64.zip) |
+| macOS Intel | [ZTP-Policy-Simulator-1.8.9-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.9/ZTP-Policy-Simulator-1.8.9-macos-x64.zip) |
 | Source | clone the repo, or GitHub's "Source code" download on the release |
 
-Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.8/SHA256SUMS.txt)
+Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.9/SHA256SUMS.txt)
 
 No install, no Node.js required. Run it and it opens `http://127.0.0.1:8787`.
 macOS builds are unsigned — before first run: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`.
@@ -111,6 +111,24 @@ Port from the URL scheme (hostnames assume HTTPS/443) · network service and app
 - No per-transaction log lookup: the console's transaction-log endpoints refuse API-client tokens. Use the console's Web / Firewall Insights logs for per-transaction proof.
 - ZCC field names follow the shapes verified by the Policy Wizard; report any app profile that shows "no forwarding profile linked".
 - Zscaler-managed categories whose members the API doesn't return (e.g. *Zscaler Recommended Exemptions*, *Office 365* as a URL category) match only when the URL lookup returns them; rules on them may show as not matching for those destinations.
+
+## Changes in 1.8.9
+**🌐 Network path.** The Result and Decision path tabs now show where the traffic goes:
+- **ZIA:** 💻 device (or ☁️ workload behind its Cloud/Branch Connector) → **Zscaler (ZIA)**, with the verdict and the deciding rule under it → 🌐 internet → destination.
+- **ZPA:** 💻 device → **Zscaler (ZPA)**, with the access rule → 🏢 **data center** → **App Connector** group (connectors up/total) → private app.
+- **Blocked:** a ✖ shows where the path stops.
+- **Bypassed:** the traffic arcs past Zscaler straight to the internet, with the reason.
+- **Other paths:** for other app profiles or networks (e.g. *On-Trusted: bypassed*), they're listed under the diagram.
+- **Download:** SVG or PNG.
+
+**Decision path tab layout**
+- The flowchart now sits **next to** the result, what was simulated and the step-by-step list, and stays in view while you scroll the steps.
+- On wide screens, the network path and the result share the top row.
+- The flowchart is narrower, and only leaves room for branches when there are conditions to show.
+
+**Using the screen**
+- The page uses up to 1680px of width (was 1180px).
+- The left navigation stays visible while you scroll.
 
 ## Changes in 1.8.8
 **🧭 Decision path tab.** Every result now has three tabs: **Result**, **Decision path** and **Every module**.

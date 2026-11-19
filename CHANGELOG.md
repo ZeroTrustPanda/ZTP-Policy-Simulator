@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.8.9 — 2026-11-19
+- New **Network path** diagram on the Result and Decision path tabs: device (or workload behind its Cloud/Branch Connector) → Zscaler (ZIA or ZPA, with the verdict and deciding rule under it) → internet, or → data center with the App Connector group, connectors up/total and the private app. Blocks show where the path stops; bypassed traffic arcs past Zscaler straight to the internet; other app-profile paths are listed. Download as SVG or PNG.
+- Decision path tab re-laid out: the flowchart sits beside the result, inputs and step-by-step details and stays in view while you scroll; on wide screens the network path and result share the top row. Flowchart is narrower and only reserves room for branches when there are conditions.
+- Wider content area (up to 1680px) and the left navigation stays visible while scrolling.
+
 ## 1.8.8 — 2026-11-19
 - New **Decision path** tab on every result (Result | Decision path | Every module): a flowchart of each policy in evaluation order, the deciding step highlighted, later steps marked "not reached", skipped policies collapsed, and dashed branches for conditions that would change the result. Download as SVG or PNG.
 - The tab also shows the result with "would change if…", what was simulated (destination, port, user/groups, categories and their source, cloud app, resolved IPs, device), and a step-by-step list with each policy's deciding rule, criteria, rules that depend on missing context, and all evaluated rules. Clicking a flowchart box opens its step.

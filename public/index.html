@@ -41,6 +41,7 @@ body { font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-
 .auth-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .main { flex: 1; display: flex; }
 .sidebar { width: 260px; background: var(--bg-secondary); border-right: 1px solid var(--border); padding: 1.5rem 0; flex-shrink: 0; }
+.sidebar { position: sticky; top: 64px; align-self: flex-start; height: calc(100vh - 64px); overflow-y: auto; } /* nav stays in view while results scroll */
 .sidebar-section { padding: 0 1rem; margin-bottom: 1.5rem; }
 .sidebar-section-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); padding: 0 .5rem; margin-bottom: 8px; }
 .sidebar-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius); cursor: pointer; font-size: 14px; color: var(--text-secondary); transition: all .15s; user-select: none; }
@@ -54,7 +55,7 @@ body { font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-
 .sidebar-link { display: block; width: 100%; text-align: left; background: none; border: none; color: var(--text-secondary); font: inherit; font-size: 13px; padding: 7px 12px; border-radius: var(--radius); cursor: pointer; }
 .sidebar-link:hover:not(:disabled) { background: var(--bg-card); color: var(--text-primary); }
 .sidebar-link:disabled { opacity: .4; cursor: not-allowed; }
-.content { flex: 1; padding: 2rem 3rem 4rem; max-width: 1180px; min-width: 0; }
+.content { flex: 1; padding: 2rem 3rem 4rem; max-width: 1680px; min-width: 0; }
 .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1.5rem; margin-bottom: 1.25rem; }
 .card-header { margin-bottom: 1rem; }
 .card-header h2 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
@@ -164,12 +165,18 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 12
 .seg button:hover { color: var(--text-primary); }
 .seg button.on { background: var(--accent-blue-dim); color: #bfdbfe; }
 .rtabs { margin-bottom: 1rem; }
-.dp-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; align-items: stretch; }
-.dp-grid > .card { margin-bottom: 1.25rem; }
-@media (max-width: 1000px) { .dp-grid { grid-template-columns: 1fr; } }
-.dp-card .dp-wrap svg { max-width: 980px; display: block; margin: 0 auto; }
-.dp-kvs { display: grid; gap: 6px; }
-.dp-kv { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px; font-size: 13px; } .dp-kv span { color: var(--text-secondary); } .dp-kv b { font-weight: 500; word-break: break-word; }
+.dp-layout { display: grid; grid-template-columns: max-content minmax(360px, 1fr); gap: 1.25rem; align-items: start; }
+.dp-left { position: sticky; top: 76px; max-height: calc(100vh - 88px); overflow: auto; border-radius: var(--radius-lg); }
+.dp-left .card, .dp-right .card { margin-bottom: 1rem; }
+.dp-card { padding: 1rem 1rem 1.1rem; }
+.dp-net { padding: 1rem 1rem 1.1rem; margin-bottom: 1rem; } .dp-net .dp-wrap svg { max-width: 1100px; width: 100%; margin: 0 auto; }
+.dp-top { display: block; } .dp-res-top { display: none; }
+@media (min-width: 1680px) { .dp-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 0.42fr); gap: 1.25rem; align-items: stretch; } .dp-top > .card, .dp-res-top > .card { margin-bottom: 1rem; height: calc(100% - 1rem); } .dp-res-top { display: block; } .dp-res-side { display: none; } }
+.dp-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; } .dp-head h3 { font-size: 15px; } .dp-btns { display: flex; gap: 6px; }
+.dp-wrap svg { display: block; max-width: 100%; height: auto; }
+@media (max-width: 1150px) { .dp-layout { grid-template-columns: 1fr; } .dp-left { position: static; max-height: none; } .dp-wrap { overflow-x: auto; } .dp-wrap svg { max-width: none; } }
+.dp-kvs { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px 20px; }
+.dp-kv { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; font-size: 13px; } .dp-kv span { color: var(--text-secondary); } .dp-kv b { font-weight: 500; word-break: break-word; }
 .dp-result.BLOCK { border-color: var(--accent-red); } .dp-result.ALLOW { border-color: var(--accent-green); } .dp-result.CAUTION { border-color: var(--accent-amber); } .dp-result.ISOLATE { border-color: var(--accent-cyan); }
 .dp-skip { font-size: 12.5px; color: var(--text-secondary); padding: 8px 12px; margin-bottom: 6px; border: 1px dashed var(--border); border-radius: var(--radius); }
 .dp-step.flash { box-shadow: 0 0 0 2px var(--accent-blue); transition: box-shadow .3s; }
@@ -1081,7 +1088,7 @@ function renderSimResult(j) {
   const rest = changeCard(s, c, j.modules) + forwardingCard(j.modules.find((m) => m.module.startsWith('Forwarding')), s);
   const tab = (id, label, on) => `<button class="${on ? 'on' : ''}" data-rtab="${id}">${label}</button>`;
   return head + `<div class="seg rtabs">${tab('sum', '📋 Result', true)}${tab('path', '🧭 Decision path', false)}${tab('mods', '🧩 Every module', false)}</div>`
-    + `<div data-rpane="sum">${tiles}${rest}</div><div data-rpane="path" class="hidden">${pathTab(j)}</div><div data-rpane="mods" class="hidden">${modulesCard(j.modules, s)}</div>`;
+    + `<div data-rpane="sum">${tiles}${window.DecisionPath && DecisionPath.netCard ? DecisionPath.netCard(j) : ''}${rest}</div><div data-rpane="path" class="hidden">${pathTab(j)}</div><div data-rpane="mods" class="hidden">${modulesCard(j.modules, s)}</div>`;
 }
 // Decision path tab: the flowchart, what was simulated, and every step with its rules, criteria and conditions.
 function pathTab(j) {
@@ -1120,8 +1127,10 @@ function pathTab(j) {
       ${mine.length ? `<div class="t-title" style="margin-top:8px">Would change the result if…</div>${mine.map(condRow).join('')}` : ''}
       ${(m.rules || []).length ? `<details><summary>All ${m.rules.length} evaluated rule(s) in this policy</summary>${m.rules.map((r) => ruleBox(r, r.status)).join('')}</details>` : ''}</div></div>`;
   }).join('');
-  return `<div class="dp-grid">${res}${tx}</div>${DecisionPath.card(j)}
-    <div class="card"><div class="card-header"><h3>Step by step</h3><p style="font-size:13px">Each policy in evaluation order. Click a box in the flowchart, or a step here, for its rules and why they matched.</p></div>${stepHtml}</div>`;
+  // Flowchart on the left (stays in view while you scroll), result, inputs and every step on the right.
+  // Wide screens: network path and result side by side on top. Narrower: result moves to the right of the flowchart.
+  return `<div class="dp-top">${DecisionPath.netCard ? DecisionPath.netCard(j) : ''}<div class="dp-res-top">${res}</div></div><div class="dp-layout"><div class="dp-left">${DecisionPath.card(j)}</div>
+    <div class="dp-right"><div class="dp-res-side">${res}</div>${tx}<div class="card dp-steps"><div class="card-header"><h3>Step by step</h3><p style="font-size:13px">Each policy in evaluation order. Click a box in the flowchart, or a step here, for its rules and why they matched.</p></div>${stepHtml}</div></div></div>`;
 }
 function showResultTab(id) {
   document.querySelectorAll('[data-rtab]').forEach((b) => b.classList.toggle('on', b.dataset.rtab === id));

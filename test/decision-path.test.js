@@ -52,3 +52,25 @@ test('every condition is drawn on some step (none silently dropped)', () => {
     assert.equal(drawn + Number(more), n, t);
   }
 });
+
+test('network path: ZPA app goes through the App Connector, web traffic through ZIA to the internet, bypass goes direct', () => {
+  const dev = Object.assign({}, data.demoDevices['dana.lee@hospital.example'][0], { lastSeen: Date.now() });
+  const zpa = run('pacs.hospital.example', { port: 104, user: 'dana.lee@hospital.example', groups: ['Radiology'], device: dev });
+  const rz = DP.route(zpa);
+  assert.equal(rz.mode, 'zpa'); assert.ok(rz.app && rz.app.group && rz.app.connectors.length);
+  assert.match(DP.networkSvg(zpa), /App Connector/);
+  const web = run('https://casino.example', { categories: ['GAMBLING'] });
+  const rw = DP.route(web);
+  assert.equal(rw.mode, 'zia'); assert.ok(rw.blocked); assert.match(rw.zs.rule, /Block Gambling and Adult/);
+  assert.match(DP.networkSvg(web), /Internet/);
+  const byp = run('https://zoom.us', { categories: ['WEB_CONFERENCING'], device: dev, user: 'dana.lee@hospital.example' });
+  assert.equal(byp.summary.overall, 'BYPASSED');
+  assert.equal(DP.route(byp).mode, 'direct');
+  assert.match(DP.networkSvg(byp), /Not sent to Zscaler/);
+});
+
+test('network path: a workload is drawn as a server behind its connector', () => {
+  const r = run('https://update.example', { categories: ['NEWS'], source: 'workload', sourceIp: '10.40.1.5', workloadGroups: ['Lab Analyzers'] });
+  const rt = DP.route(r);
+  assert.equal(rt.src.kind, 'server'); assert.match(rt.src.sub, /Connector/);
+});
