@@ -382,6 +382,7 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
             <div><label class="form-label">File operation</label><select id="operation"><option value="">Not specified</option><option>DOWNLOAD</option><option>UPLOAD</option></select></div>
             <div><label class="form-label">Request method</label><select id="method"><option value="">Auto (GET, or CONNECT if not decrypted)</option><option>GET</option><option>POST</option><option>PUT</option><option>HEAD</option><option>OPTIONS</option><option>DELETE</option><option>CONNECT</option><option>OTHER</option></select></div>
             <div><label class="form-label">URL categories (override lookup)</label><input type="text" id="cats" placeholder="e.g. GAMBLING"></div>
+            <div><label class="form-label">Cloud app (override lookup)</label><input type="text" id="cloudApp" placeholder="e.g. ZOOM, GOOGLE_CHAT, ONEDRIVE"></div>
           </div></div>
           <div class="opt" id="secApp"><div class="grid">
             <div><label class="form-label">Application (overrides port inference)</label><input type="text" id="application" placeholder="e.g. QUIC, GOOGLE_DNS"></div>
@@ -544,6 +545,7 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
     </div>
   </div>
 </div>
+<script src="decision-path.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -787,7 +789,7 @@ function formBody() {
   return { useZpa: zpaOn(), source: trafficSrc,
     ...(wl ? { workloadTags: $('wlTags').value.trim(), workloadGroups: $('wlGroups').value.trim(), ecGroup: $('wlEcGroup').value.trim(), connectorKind: $('wlKind').value } : {}),
     target: v('target'), port: v('port'), protocol: $('protocol').value, networkService: v('networkService'),
-    fileType: v('fileType'), operation: v('operation'), method: v('method'), categories: list('cats', true), application: v('application'),
+    fileType: v('fileType'), operation: v('operation'), method: v('method'), categories: list('cats', true), application: v('application'), cloudApp: v('cloudApp').toUpperCase(),
     picks: !wl && vis('cmpQ') ? cmpPicks : [], deviceUdid: !wl && vis('cmpQ') && cmpPicks.length === 1 && cmpPicks[0].kind === 'user' ? selDevice : null, department: wl ? '' : v('department'), location: v('location'), sourceIp: wl ? $('wlSourceIp').value.trim() : v('sourceIp'), destCountry: v('destCountry'),
     manual: vis('pacText') ? { pacText: $('pacText').value, destExclusions: $('destExclusions').value, destInclusions: $('destInclusions').value, ipExclusions: $('ipExclusions').value, ipInclusions: $('ipInclusions').value, vpnGateways: $('vpnGateways').value } : {},
   };
@@ -1057,6 +1059,41 @@ function compareView(j) {
     <table class="cmp"><tr><th style="width:24%">Module</th><th>${head(A)}</th><th>${head(B)}</th></tr>${rows}</table>${full(A)}${full(B)}</div>`;
 }
 
+// ---------- result layout: decision path shown inline (under the action tiles) or as its own tab ----------
+// View preference: ?pathView=inline|tab in the URL wins (for testing), else the user's last choice, else inline.
+function pathView() {
+  const q = new URLSearchParams(location.search).get('pathView');
+  if (q === 'inline' || q === 'tab') return q;
+  try { return localStorage.getItem('ztpPathView') === 'tab' ? 'tab' : 'inline'; } catch { return 'inline'; }
+}
+function setPathView(v) { try { localStorage.setItem('ztpPathView', v); } catch {} if (lastSim && lastSim.result) $('simOut').innerHTML = renderSimResult(lastSim.result); }
+function renderSimResult(j) {
+  const s = j.summary, c = j.context;
+  window.dpResult = j;
+  const head = incompleteBox(s)
+    + (j.pick ? `<div class="form-hint" style="margin-bottom:8px">Simulated as ${j.pick.kind === 'user' ? '👤' : '👥'} <b>${esc(pickLabel(j.pick))}</b>. Add a second user or group to compare.</div>` : '');
+  const tiles = `<div class="tiles">${actionTile(s, c, j.modules)}${basedOnTile(s, c)}</div>`;
+  const path = window.DecisionPath ? DecisionPath.card(j) : '';
+  const rest = changeCard(s, c, j.modules) + forwardingCard(j.modules.find((m) => m.module.startsWith('Forwarding')), s);
+  const mods = modulesCard(j.modules, s);
+  const v = pathView();
+  const toggle = `<div class="seg" style="margin-bottom:12px"><button class="${v === 'inline' ? 'on' : ''}" onclick="setPathView('inline')">Path inline</button><button class="${v === 'tab' ? 'on' : ''}" onclick="setPathView('tab')">Path as tab</button></div>`;
+  if (v === 'inline') return head + toggle + tiles + path + rest + mods;
+  const tab = (id, label, on) => `<button class="${on ? 'on' : ''}" data-rtab="${id}">${label}</button>`;
+  return head + toggle + `<div class="seg rtabs">${tab('sum', '📋 Result', true)}${tab('path', '🧭 Decision path', false)}${tab('mods', '🧩 Every module', false)}</div>`
+    + `<div data-rpane="sum">${tiles}${rest}</div><div data-rpane="path" class="hidden">${path}</div><div data-rpane="mods" class="hidden">${mods}</div>`;
+}
+function showResultTab(id) {
+  document.querySelectorAll('[data-rtab]').forEach((b) => b.classList.toggle('on', b.dataset.rtab === id));
+  document.querySelectorAll('[data-rpane]').forEach((p) => p.classList.toggle('hidden', p.dataset.rpane !== id));
+}
+document.addEventListener('click', (e) => { const b = e.target.closest('[data-rtab]'); if (b) showResultTab(b.dataset.rtab); });
+// Clicking a box in the decision path opens that module's rules.
+window.dpShowModule = (name) => {
+  if (document.querySelector('[data-rpane]')) showResultTab('mods');
+  const m = [...document.querySelectorAll('#simOut .mod')].find((el) => (el.querySelector('.name') || {}).textContent === name);
+  if (m) { m.classList.add('open'); m.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+};
 $('btnSim').onclick = async () => {
   if (!sid || !loaded) { msg('simMsg', 'Connect and load policies first.'); return; }
   $('btnSim').disabled = true; $('simMsg').innerHTML = '<span class="spinner"></span> Evaluating…';
@@ -1076,10 +1113,7 @@ $('btnSim').onclick = async () => {
     const s = j.summary, c = j.context;
     rankingOn = !!c.adminRanking;
     const errs = Object.keys((j.snapshot && j.snapshot.errors) || {});
-    $('simOut').innerHTML = incompleteBox(s)
-      + (j.pick ? `<div class="form-hint" style="margin-bottom:8px">Simulated as ${j.pick.kind === 'user' ? '👤' : '👥'} <b>${esc(pickLabel(j.pick))}</b>. Add a second user or group to compare.</div>` : '')
-      + `<div class="tiles">${actionTile(s, c, j.modules)}${basedOnTile(s, c)}</div>`
-      + changeCard(s, c, j.modules) + forwardingCard(j.modules.find((m) => m.module.startsWith('Forwarding')), s) + modulesCard(j.modules, s);
+    $('simOut').innerHTML = renderSimResult(j);
     $('simMsg').textContent = '';
   } catch (e) {
     const timeout = /time ?out|ETIMEDOUT|504|408/i.test(e.message);

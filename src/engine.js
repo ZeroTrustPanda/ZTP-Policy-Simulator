@@ -1295,7 +1295,7 @@ function simulate(snap, ctx, manual = {}) {
   // A Cloud App Control allow rule that depends on context (e.g. a group the user may be in) would stop URL Filtering.
   if (!cacAllow && url.verdict !== 'N/A') {
     const maybe = (cac.rules || []).filter((e) => e.status === 'unknown' && e.action === 'ALLOW' && !e.cascading);
-    if (maybe.length && ['BLOCK', 'CAUTION', 'ISOLATE'].includes(url.verdict)) url.couldOverride = [...(url.couldOverride || []), ...maybe.map((e) => Object.assign({}, e, { name: `${e.name} (Cloud App Control)` }))];
+    if (maybe.length && ['BLOCK', 'CAUTION', 'ISOLATE'].includes(url.verdict)) url.couldOverride = [...(url.couldOverride || []), ...maybe.map((e) => Object.assign({}, e, { _module: 'Cloud App Control' }))];
   }
   if (cacAllow && cac.cascading && url.verdict !== 'N/A') url.note = [url.note, `Cloud App Control rule "${cac.decidingRule.name}" allowed the app and cascades to URL Filtering, so this policy still applies.`].filter(Boolean).join(' ');
   const modules = [
@@ -1375,7 +1375,7 @@ function summarize(modules, ctx = {}) {
       const kinds = [...new Set(unk.map(condKind))];
       const kind = ['identity', 'workload', 'location', 'other', 'input'].find((k) => kinds.includes(k)) || 'other';
       const action = r.forward ? ({ BLOCK: 'BLOCK', BYPASSES_ZSCALER: 'BYPASS' }[r.forward.verdict] || 'ALLOW') : ACT_RE(r.action);
-      alsoBasedOn.push({ kind, condition: unk.map(condLabel).join(' + ') || 'context not supplied', action, module: m.module, rule: r.name, order: r.order, detail: r.forward ? `Connector: ${r.forward.text}` : undefined });
+      alsoBasedOn.push({ kind, condition: unk.map(condLabel).join(' + ') || 'context not supplied', action, module: r._module || m.module, rule: r.name, order: r.order, detail: r.forward ? `Connector: ${r.forward.text}` : undefined });
     }
   };
 
