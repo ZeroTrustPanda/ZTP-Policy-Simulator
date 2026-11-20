@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ZeroTrustPanda ZS Policy Simulator</title>
+<title>Zscaler Policy Troubleshooting Toolkit</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -267,6 +267,83 @@ table.cmp tr.diff td:first-child { box-shadow: inset 3px 0 0 #f59e0b; }
 .selbar select, .selbar input[type=text] { width: auto; padding: 7px 10px; font-size: 13px; }
 td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
 .hidden { display: none !important; }
+
+/* ---------- toolkit shell ---------- */
+.header-brand .brand-sub { font-size: 11px; color: var(--text-muted); letter-spacing: .3px; margin-top: -2px; }
+.sidebar-item.tool .tool-ico { width: 24px; text-align: center; flex-shrink: 0; }
+.home-hero { padding: 1.25rem 0 1.5rem; max-width: 880px; }
+.home-kicker { font-size: 11px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: var(--accent-cyan); margin-bottom: 6px; }
+.home-hero h2 { font-size: 30px; font-weight: 700; line-height: 1.15; margin-bottom: 10px; }
+.home-hero p { font-size: 15px; color: var(--text-secondary); }
+.home-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; max-width: 1240px; }
+@media (min-width: 1700px) { .home-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: none; } }
+.home-card { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; gap: 10px; padding: 1.5rem; border-radius: var(--radius-lg); border: 1px solid var(--border); background: var(--bg-card); transition: border-color .15s, transform .15s, background .15s; }
+.home-card:hover, .home-card:focus-visible { border-color: var(--accent-blue); background: var(--bg-card-hover); transform: translateY(-2px); }
+.home-card:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.hc-top { display: flex; justify-content: space-between; align-items: center; }
+.hc-ico { width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; font-size: 24px; background: color-mix(in srgb, var(--c) 18%, transparent); border: 1px solid color-mix(in srgb, var(--c) 45%, transparent); }
+.hc-tag { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px; background: rgba(16,185,129,.12); color: #6ee7b7; border: 1px solid rgba(16,185,129,.3); white-space: nowrap; }
+.hc-tag.key { background: rgba(59,130,246,.12); color: #93c5fd; border-color: rgba(59,130,246,.35); }
+.hc-title { font-size: 19px; font-weight: 600; margin-top: 4px; }
+.hc-desc { font-size: 14px; color: var(--text-secondary); }
+.hc-list { list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-secondary); }
+.hc-list li::before { content: '✓'; color: var(--accent-green); margin-right: 8px; font-weight: 700; }
+.hc-go { margin-top: auto; padding-top: 6px; font-size: 13px; font-weight: 600; color: #93c5fd; }
+@media (max-width: 900px) { .home-grid { grid-template-columns: 1fr; } }
+.tool-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 1rem; flex-wrap: wrap; }
+.tool-head h2 { font-size: 22px; font-weight: 600; margin-bottom: 2px; }
+.tool-head p { font-size: 14px; color: var(--text-secondary); max-width: 900px; }
+.tool-credit { font-size: 12px; color: var(--text-muted); } .tool-credit a { color: #93c5fd; }
+body[data-tool="zcc"] .content { max-width: none; padding: 1.25rem 1.5rem 1rem; }
+.zcc-frame { width: 100%; height: calc(100vh - 64px - 7.5rem); min-height: 560px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-primary); display: block; }
+/* shared bits for the analyzers */
+.stat-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(125px, 1fr)); gap: 10px; margin-bottom: 1.25rem; }
+.stat { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; min-width: 0; }
+.stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--text-muted); font-weight: 600; }
+.stat .v { font-size: 22px; font-weight: 700; margin-top: 2px; } .stat .s { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stat.bad .v { color: #fca5a5; } .stat.good .v { color: #6ee7b7; } .stat.zs .v { color: #93c5fd; } .stat.warn .v { color: #fcd34d; }
+.finding { display: grid; grid-template-columns: 74px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 11px 0; border-top: 1px solid var(--border); }
+.finding:first-child { border-top: none; padding-top: 0; }
+.finding .ft { font-weight: 600; font-size: 14px; word-break: break-word; } .finding .fd { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
+.finding .fa { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.sev { display: inline-block; text-align: center; min-width: 64px; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
+.sev.high { background: var(--accent-red-dim); color: #fca5a5; } .sev.medium { background: var(--accent-amber-dim); color: #fcd34d; } .sev.low { background: #273349; color: #cbd5e1; } .sev.info { background: var(--accent-blue-dim); color: #bfdbfe; }
+.rtabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 1rem; flex-wrap: wrap; }
+.rtabs button { background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-secondary); font: inherit; font-size: 14px; padding: 9px 14px; cursor: pointer; }
+.rtabs button.on { color: var(--text-primary); border-bottom-color: var(--accent-blue); font-weight: 600; }
+.rtabs button .n { font-size: 11px; color: var(--text-muted); margin-left: 4px; }
+.tbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.tbar input[type=text], .tbar select { width: auto; padding: 7px 10px; font-size: 13px; }
+.tbar input[type=text] { flex: 1; min-width: 200px; }
+.tscroll { overflow: auto; max-height: 70vh; border: 1px solid var(--border); border-radius: var(--radius); }
+.tscroll table { font-size: 12.5px; } .tscroll th { position: sticky; top: 0; z-index: 1; }
+.tscroll td { padding: 7px 10px; } .tscroll th { padding: 7px 10px; }
+.nowrap { white-space: nowrap; } .num { text-align: right; font-variant-numeric: tabular-nums; } .dim { color: var(--text-muted); }
+.via { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.via.ZIA { background: rgba(59,130,246,.2); color: #93c5fd; } .via.ZPA { background: rgba(139,92,246,.22); color: #c4b5fd; } .via.Zscaler { background: rgba(6,182,212,.18); color: #67e8f9; }
+.via.direct { background: rgba(245,158,11,.16); color: #fcd34d; } .via.local { background: #273349; color: var(--text-secondary); }
+.st { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.st.ok { background: var(--accent-green-dim); color: #6ee7b7; } .st.bad { background: var(--accent-red-dim); color: #fca5a5; } .st.warn { background: var(--accent-amber-dim); color: #fcd34d; } .st.dim { background: #273349; color: var(--text-secondary); }
+.linkbtn2 { background: none; border: none; color: #93c5fd; font: inherit; font-size: 12px; cursor: pointer; padding: 0; white-space: nowrap; }
+.linkbtn2:hover { text-decoration: underline; }
+.simbtn { background: rgba(6,182,212,.08); border: 1px solid #0e7490; color: #67e8f9; border-radius: 6px; font: inherit; font-size: 12px; padding: 3px 9px; cursor: pointer; white-space: nowrap; }
+.simbtn:hover { background: rgba(6,182,212,.2); }
+.code { font-family: var(--mono); font-size: 12px; line-height: 1.6; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius); overflow: auto; max-height: 72vh; counter-reset: ln; }
+.code .ln { display: grid; grid-template-columns: 48px minmax(0, 1fr); white-space: pre; padding-right: 10px; min-width: max-content; }
+.code .ln .no { grid-row: span 2; }
+.code .ln .no { color: var(--text-muted); text-align: right; padding-right: 12px; user-select: none; border-right: 1px solid var(--border); margin-right: 12px; }
+.code .ln.hit-t { background: rgba(16,185,129,.12); } .code .ln.hit-f { background: rgba(148,163,184,.07); } .code .ln.ret { background: rgba(59,130,246,.25); box-shadow: inset 3px 0 0 var(--accent-blue); }
+.code .ln.err { background: rgba(239,68,68,.18); box-shadow: inset 3px 0 0 var(--accent-red); } .code .ln.flash { animation: flash 1.2s; }
+.code .ln .lt { grid-column: 2; font-family: 'IBM Plex Sans', sans-serif; font-size: 11px; color: #93c5fd; white-space: normal; padding: 0 0 2px; }
+.code .ln .lt:empty { display: none; }
+.code .ln.hit-t .lt { color: #6ee7b7; } .code .ln.hit-f .lt { color: var(--text-muted); } .code .ln.ret .lt { color: #bfdbfe; font-weight: 600; }
+@keyframes flash { from { background: rgba(245,158,11,.45); } }
+.split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.25rem; align-items: start; }
+@media (max-width: 1300px) { .split { grid-template-columns: 1fr; } }
+.chain { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; } .chain .arrow { color: var(--text-muted); font-size: 11px; }
+.trace { margin: 6px 0 2px; font-family: var(--mono); font-size: 11.5px; color: var(--text-secondary); }
+.trace div { padding: 1px 0; } .trace .t { color: #6ee7b7; } .trace .f { color: var(--text-muted); }
+tr.sel td { background: rgba(59,130,246,.12); }
 @media (max-width: 900px) { .sidebar { display: none; } .content { padding: 1rem; } .span2 { grid-column: auto; } .crit { grid-template-columns: 1fr; } .header { padding: 0 1rem; } }
 </style>
 </head>
@@ -275,7 +352,7 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
   <header class="header">
     <div class="header-brand">
       <div class="logo">🐼</div>
-      <div><h1>ZeroTrustPanda ZS Policy Simulator</h1></div>
+      <div><h1>Zscaler Policy Troubleshooting Toolkit</h1><div class="brand-sub">by ZeroTrustPanda</div></div>
       <span class="tag" id="ver">v</span>
       <button class="tag hidden" id="updBadge" style="background:var(--accent-amber);color:#111;border:0;cursor:pointer;font-weight:600" title="A newer version is on GitHub">⬆ Update available</button>
     </div>
@@ -288,13 +365,16 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
   <div class="main">
     <aside class="sidebar">
       <div class="sidebar-section">
-        <div class="sidebar-section-title">Steps</div>
+        <div class="sidebar-item tool" data-tool="home"><span class="tool-ico">🏠</span> Home</div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Policy Simulator</div>
         <div class="sidebar-item active" data-step="1"><span class="step-num">1</span> Connect</div>
         <div class="sidebar-item disabled" data-step="2"><span class="step-num">2</span> Load policies</div>
         <div class="sidebar-item disabled" data-step="3"><span class="step-num">3</span> Simulate</div>
       </div>
       <div class="sidebar-section">
-        <div class="sidebar-section-title">Session</div>
+        <div class="sidebar-section-title">Simulator session</div>
         <button class="sidebar-link" id="btnSaveSnap" disabled>💾 Save policy snapshot</button>
         <button class="sidebar-link" id="btnOpenSnap">📂 Open saved snapshot…</button>
         <button class="sidebar-link" id="btnChanges" disabled>🧾 Policy changes</button>
@@ -304,12 +384,56 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
         <input type="file" id="snapFile" accept=".json,application/json" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none" tabindex="-1" aria-hidden="true">
       </div>
       <div class="sidebar-section">
+        <div class="sidebar-section-title">Troubleshooting</div>
+        <div class="sidebar-item tool" data-tool="zcc"><span class="tool-ico">📜</span> ZCC Log Explorer</div>
+        <div class="sidebar-item tool" data-tool="pcap"><span class="tool-ico">📡</span> Packet Capture Analyzer</div>
+        <div class="sidebar-item tool" data-tool="pac"><span class="tool-ico">🧭</span> PAC Analyzer</div>
+      </div>
+      <div class="sidebar-section">
         <div class="sidebar-section-title">About</div>
-        <div class="form-hint" style="padding:0 .5rem">Read-only unless you turn on policy changes, and every change is previewed first. Credentials stay in memory on this machine and are never written to disk.</div>
+        <div class="form-hint" style="padding:0 .5rem">Everything runs on this computer. The simulator is read-only unless you turn on policy changes, and every change is previewed first. Credentials, logs, captures and PAC files stay in memory and are never written to disk.</div>
       </div>
     </aside>
     <main class="content">
-      <section id="step1">
+      <section id="homeSec">
+        <div class="home-hero">
+          <div class="home-kicker">ZeroTrustPanda</div>
+          <h2>Zscaler Policy Troubleshooting Toolkit</h2>
+          <p>Work out why traffic was blocked, allowed or bypassed: simulate policy, read Client Connector logs, take apart packet captures and test PAC files. Everything runs on this computer.</p>
+        </div>
+        <div class="home-grid">
+          <button class="home-card" data-tool="sim">
+            <div class="hc-top"><span class="hc-ico" style="--c:#3b82f6">🛡️</span><span class="hc-tag key">Uses your OneAPI key</span></div>
+            <div class="hc-title">Policy Simulator</div>
+            <div class="hc-desc">Run a user, device or workload's traffic through your live ZIA, ZPA and Client Connector policy and see which rule decides.</div>
+            <ul class="hc-list"><li>Every module in order, with the deciding rule</li><li>Decision path and network path diagrams</li><li>Bulk CSV tests and previewed policy changes</li></ul>
+            <div class="hc-go">Open simulator →</div>
+          </button>
+          <button class="home-card" data-tool="zcc">
+            <div class="hc-top"><span class="hc-ico" style="--c:#8b5cf6">📜</span><span class="hc-tag">Offline · no API key</span></div>
+            <div class="hc-title">ZCC Log Explorer</div>
+            <div class="hc-desc">Load a Client Connector log bundle and see tunnel state, ZPA sessions and app segments, ZIA web traffic and errors on one timeline.</div>
+            <ul class="hc-list"><li>ZPA mTunnels with failure reasons</li><li>ZIA connections, gateways and bypasses</li><li>Searchable timeline of every log line</li></ul>
+            <div class="hc-go">Open log explorer →</div>
+          </button>
+          <button class="home-card" data-tool="pcap">
+            <div class="hc-top"><span class="hc-ico" style="--c:#06b6d4">📡</span><span class="hc-tag">Offline · no API key</span></div>
+            <div class="hc-title">Packet Capture Analyzer</div>
+            <div class="hc-desc">Drop a .pcap, .pcapng or a zip with captures and get the conversations, DNS, TLS and what went through Zscaler, with problems called out.</div>
+            <ul class="hc-list"><li>Failed connects, resets, DNS errors, TLS alerts</li><li>SSL inspection and certificate pinning</li><li>Send any destination to the simulator</li></ul>
+            <div class="hc-go">Open capture analyzer →</div>
+          </button>
+          <button class="home-card" data-tool="pac">
+            <div class="hc-top"><span class="hc-ico" style="--c:#10b981">🧭</span><span class="hc-tag">Offline · no API key</span></div>
+            <div class="hc-title">PAC Analyzer</div>
+            <div class="hc-desc">Load a PAC file from a file, a URL or your tenant, check it for mistakes and see exactly where each URL goes and which line decided.</div>
+            <ul class="hc-list"><li>Lint: syntax, DNS lookups, lookalike matches</li><li>Test URLs with your client IP and DNS</li><li>Then simulate the policy for the traffic</li></ul>
+            <div class="hc-go">Open PAC analyzer →</div>
+          </button>
+        </div>
+      </section>
+
+      <section id="step1" class="hidden">
         <div class="card">
           <div class="card-header"><h2>Connect to Zscaler</h2><p>OneAPI client credentials from ZIdentity. Used only to read policy and activity.</p></div>
           <div class="grid">
@@ -478,6 +602,15 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
           <div id="diagOut" class="msg"></div>
         </div>
       </section>
+
+      <section id="zccSec" class="hidden">
+        <div class="tool-head"><div><h2>📜 ZCC Log Explorer</h2><p>Drop a Client Connector log bundle (Export Logs .zip, <span class="mono">ZSATunnel_*.log</span>) with <b>Load logs</b>. Parsed on this computer and kept in memory only.</p></div>
+          <div class="tool-credit">Log explorer by <a href="https://github.com/alexbnn/zcc-log-explorer" target="_blank" rel="noopener">Alex Bonner</a></div></div>
+        <iframe id="zccFrame" title="ZCC Log Explorer" class="zcc-frame"></iframe>
+      </section>
+
+      <section id="pcapSec" class="hidden"></section>
+      <section id="pacSec" class="hidden"></section>
     </main>
   </div>
 </div>
@@ -565,6 +698,8 @@ td.cb, th.cb { width: 32px; } td.cb input { cursor: pointer; }
   </div>
 </div>
 <script src="decision-path.js"></script>
+<script src="tools/pcap.js"></script>
+<script src="tools/pac.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -622,18 +757,63 @@ function msg(id, m, ok) { $(id).innerHTML = ok ? esc(m) : `<span class="err">${e
 
 // ---------- steps ----------
 function canGo(n) { return n === 1 || (n === 2 && !!sid && !demo) || (n === 3 && loaded); }
+// ---------- toolkit: one page, one visible section ----------
+const SECTIONS = ['homeSec', 'step1', 'step2', 'step3', 'chgSec', 'auditSec', 'diagSec', 'zccSec', 'pcapSec', 'pacSec'];
+let tool = 'home';
+function showSection(id, t) {
+  for (const k of SECTIONS) $(k).classList.toggle('hidden', k !== id);
+  tool = t; document.body.dataset.tool = t;
+  document.querySelectorAll('.sidebar-item.tool').forEach((el) => el.classList.toggle('active', el.dataset.tool === t));
+  const h = t === 'sim' ? '#simulator' : t === 'home' ? '#' : '#' + t;
+  if ((location.hash || '#') !== h) history.replaceState(null, '', h === '#' ? location.pathname : h);
+}
+function openTool(t) {
+  if (t === 'sim') { go(canGo(step) ? step : 1); return; }
+  if (t === 'zcc') { if (!$('zccFrame').getAttribute('src')) $('zccFrame').src = '/zcc/'; showSection('zccSec', 'zcc'); }
+  else if (t === 'pcap') { showSection('pcapSec', 'pcap'); PCAP.init(); }
+  else if (t === 'pac') { showSection('pacSec', 'pac'); PACUI.init(); }
+  else showSection('homeSec', 'home');
+  refreshSidebar(); window.scrollTo({ top: 0 });
+}
+document.querySelectorAll('[data-tool]').forEach((el) => el.addEventListener('click', () => openTool(el.dataset.tool)));
+// A destination from another tool (log explorer, capture, PAC) → the Policy Simulator.
+// d: { target, port, protocol, source, pac (PAC file text to test the forwarding with) }
+function simulateDest(d) {
+  if (!d || !d.target) return;
+  setMode('single');
+  if (trafficSrc !== 'device') document.querySelector('#srcSeg [data-src="device"]').click();
+  $('target').value = d.target; $('port').value = d.port || ''; $('protocol').value = d.protocol === 'udp' ? 'udp' : 'tcp';
+  if (d.pac) {
+    const cb = document.querySelector('#secChips input[data-sec="secFwd"]');
+    if (!cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change')); cb.closest('.chip').classList.add('on'); }
+    $('pacText').value = d.pac;
+  }
+  const what = `${d.target}${d.port && !/:\/\//.test(d.target) ? ':' + d.port : ''}`;
+  if (!loaded) {
+    go(sid && !demo ? 2 : 1);
+    toast('Destination ready in the simulator', `${what} from the ${d.source || 'toolkit'} is filled in. Connect and load policies (or open a snapshot, or try the sample policies), then press Simulate.`);
+    return;
+  }
+  go(3);
+  $('btnSim').click();
+  toast('Simulating', `${what} from the ${d.source || 'toolkit'}${d.pac ? ', with the PAC file' : ''}.`);
+}
+window.addEventListener('message', (ev) => {
+  if (ev.origin !== location.origin || !ev.data || ev.data.type !== 'ztp-simulate') return;
+  const d = ev.data;
+  simulateDest({ target: String(d.target || '').slice(0, 500), port: parseInt(d.port, 10) || null, protocol: d.protocol, source: String(d.source || 'ZCC Log Explorer').slice(0, 60) });
+});
 function go(n) {
   if (!canGo(n)) return;
   step = n;
-  for (const k of [1, 2, 3]) $('step' + k).classList.toggle('hidden', k !== n);
-  $('diagSec').classList.add('hidden'); $('chgSec').classList.add('hidden'); $('auditSec').classList.add('hidden');
+  showSection('step' + n, 'sim');
   if (n === 3 && mode === 'bulk') bulkHint();
   refreshSidebar(); window.scrollTo({ top: 0 });
 }
 function refreshSidebar() {
   document.querySelectorAll('.sidebar-item[data-step]').forEach((el) => {
     const n = +el.dataset.step, done = (n === 1 && !!sid) || (n === 2 && loaded);
-    el.classList.toggle('active', n === step);
+    el.classList.toggle('active', tool === 'sim' && n === step);
     el.classList.toggle('disabled', !canGo(n));
     el.classList.toggle('completed', done && n !== step);
     el.querySelector('.step-num').textContent = done && n !== step ? '✓' : n;
@@ -1659,8 +1839,7 @@ $('chgApply').onclick = async () => {
 function setPending(st) { $('pendingBadge').classList.toggle('hidden', st !== 'PENDING'); if ($('actStatus')) $('actStatus').innerHTML = `Activation status: <b>${esc(st || 'unknown')}</b>`; }
 async function refreshStatus() { try { const j = await api('/api/changes/status'); setPending(j.status); } catch {} }
 async function openChanges() {
-  for (const k of [1, 2, 3]) $('step' + k).classList.add('hidden');
-  $('diagSec').classList.add('hidden'); $('chgSec').classList.remove('hidden');
+  showSection('chgSec', 'sim');
   try {
     const m = await api('/api/changes/mode');
     $('writeToggle').checked = m.writeEnabled;
@@ -1754,8 +1933,7 @@ $('btnLocal').onclick = async () => {
 
 // ---------- recent changes (ZIA audit log) ----------
 function openAudit(q) {
-  for (const k of [1, 2, 3]) $('step' + k).classList.add('hidden');
-  $('diagSec').classList.add('hidden'); $('chgSec').classList.add('hidden'); $('auditSec').classList.remove('hidden');
+  showSection('auditSec', 'sim');
   if (q != null) { $('auditQ').value = q; $('btnAuditRun').click(); }
 }
 $('btnAudit').onclick = () => openAudit();
@@ -1788,9 +1966,7 @@ async function loadHealth() {
 
 // ---------- diagnostics ----------
 $('btnDiag').onclick = async () => {
-  for (const k of [1, 2, 3]) $('step' + k).classList.add('hidden');
-  $('chgSec').classList.add('hidden'); $('auditSec').classList.add('hidden');
-  $('diagSec').classList.remove('hidden');
+  showSection('diagSec', 'sim');
   try {
     const d = await api('/api/diagnostics');
     $('diagOut').innerHTML = `<div style="margin-bottom:8px">Token host <span class="mono">${esc(d.tokenHost)}</span> · API host <span class="mono">${esc(d.apiHost)}</span></div><table><tr><th>Time</th><th>Call</th><th>Status</th><th>Error</th></tr>${d.log.slice().reverse().map((l) => `<tr><td>${esc(new Date(l.t).toLocaleTimeString())}</td><td class="mono">${esc(l.method)} ${esc(l.url)}</td><td>${esc(l.status)}</td><td><span class="form-hint">${esc(l.err)}</span></td></tr>`).join('')}</table>`;
@@ -1798,6 +1974,10 @@ $('btnDiag').onclick = async () => {
 };
 $('btnDiagClose').onclick = () => go(step);
 refreshSidebar();
+// Start on the tool in the address (#simulator, #zcc, #pcap, #pac) or the home page.
+const toolFromHash = () => ({ simulator: 'sim', zcc: 'zcc', pcap: 'pcap', pac: 'pac' }[(location.hash || '').slice(1)] || 'home');
+openTool(toolFromHash());
+window.addEventListener('hashchange', () => { if (toolFromHash() !== tool) openTool(toolFromHash()); });
 </script>
 </body>
 </html>

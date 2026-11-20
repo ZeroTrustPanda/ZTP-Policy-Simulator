@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.0 — 2026-11-20
+- Renamed to **Zscaler Policy Troubleshooting Toolkit** (by ZeroTrustPanda). New home page with four tools; left menu gains a Troubleshooting section. Executables are now `Zscaler-Troubleshooting-Toolkit(.exe)`; download zips keep their old names for the 1.8.x update prompt.
+- **ZCC Log Explorer** integrated from github.com/alexbnn/zcc-log-explorer (Alex Bonner, with permission): ported to CommonJS, mounted at `/zcc`, no fflate dependency (shared zip reader with Zip64 and size caps), Windows log folder (`%ProgramData%\Zscaler`) and `ZCC_LOG_DIRS` using the platform path separator, toolkit theme, "Simulate policy" buttons. Its tests run in `npm test`.
+- **Packet Capture Analyzer** (`src/pcap.js`): pcap/pcapng/zip, Ethernet/VLAN/PPPoE, Linux cooked v1/v2, loopback, raw IP; TCP/UDP conversations with handshake RTT, resets, retransmissions, zero windows; DNS over UDP/TCP; TLS ClientHello/ServerHello/alerts/certificate issuer; HTTP and CONNECT; QUIC; ICMP unreachable/MTU; Zscaler path classification; findings with simulate targets; CSV export. Bounds-checked and fuzz-tested.
+- **PAC Analyzer** (`src/pac.js`): sandboxed runtime with call trace and deciding line, DNS on demand (typed answers and/or this computer's DNS), Microsoft extensions, real weekdayRange/dateRange/timeRange, lint, behaviour checks, PAC download from URL and from the loaded tenant.
+- **Security:** PAC evaluation moved out of an escapable `vm` context (outer-realm sandbox object) into a null-prototype context in a worker thread with code generation disabled, input passed as data, timeout, and worker replacement for runaway async code. The simulator's PAC step uses it.
+- PAC URL downloads now fail cleanly above 5 MB instead of hanging.
+
 ## 1.8.9 — 2026-11-19
 - New **Network path** diagram on the Result and Decision path tabs: device (or workload behind its Cloud/Branch Connector) → Zscaler (ZIA or ZPA, with the verdict and deciding rule under it) → internet, or → data center with the App Connector group, connectors up/total and the private app. Blocks show where the path stops; bypassed traffic arcs past Zscaler straight to the internet; other app-profile paths are listed. Download as SVG or PNG.
 - Decision path tab re-laid out: the flowchart sits beside the result, inputs and step-by-step details and stays in view while you scroll; on wide screens the network path and result share the top row. Flowchart is narrower and only reserves room for branches when there are conditions.

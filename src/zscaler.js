@@ -42,7 +42,7 @@ function fetchText(url, redirects = 3) {
     const req = mod.get(url, { timeout: 15000 }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirects > 0) { res.resume(); return resolve(fetchText(new URL(res.headers.location, url).toString(), redirects - 1)); }
       if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)); }
-      let d = ''; res.setEncoding('utf8'); res.on('data', (c) => { d += c; if (d.length > 2e6) req.destroy(); }); res.on('end', () => resolve(d));
+      let d = ''; res.setEncoding('utf8'); res.on('data', (c) => { d += c; if (d.length > 5e6) req.destroy(new Error('file is larger than 5 MB')); }); res.on('end', () => resolve(d));
     });
     req.on('error', reject);
     req.on('timeout', () => req.destroy(new Error('timeout')));

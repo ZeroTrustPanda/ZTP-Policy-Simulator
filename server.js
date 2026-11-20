@@ -20,6 +20,8 @@ const SESSION_TTL = 60 * 60 * 1000;
 const sessions = new Map(); // id -> {client, snap, demo, job, last}
 
 const app = express();
+// ZCC Log Explorer API (its own JSON API, mounted at /zcc; reads its own request bodies, so it goes before the JSON parser)
+app.use('/zcc', require('./src/zcc/routes').handler);
 app.use(express.json({ limit: '50mb' }));
 // Every API answer is computed fresh: no browser or proxy caching of results.
 app.use('/api', (req, res, next) => { res.set('Cache-Control', 'no-store, no-cache, must-revalidate'); res.set('Pragma', 'no-cache'); next(); });
@@ -693,17 +695,88 @@ app.post('/api/changes/activate', wrap(async (req, res) => {
   res.json({ status: out && out.status, mock: !!s.demo });
 }));
 
-app.listen(PORT, HOST, () => {
+// ---------- Packet Capture Analyzer (no API keys; the file is analyzed in memory and never saved) ----------
+app.post('/api/pcap/analyze', express.raw({ type: () => true, limit: '1gb' }), wrap(async (req, res) => {
+  const buf = req.body;
+  if (!Buffer.isBuffer(buf) || !buf.length) return res.status(400).json({ error: 'Choose a .pcap, .pcapng or .zip file.' });
+  let name = String(req.get('x-filename') || 'capture'); try { name = decodeURIComponent(name); } catch {} name = name.slice(0, 200);
+  const t0 = Date.now();
+  try {
+    const r = require('./src/pcap').analyze(buf, { name });
+    r.file.name = name; r.file.size = buf.length; r.file.ms = Date.now() - t0;
+    res.json(r);
+  } catch (e) {
+    res.status(e.status || 400).json({ error: e.message });
+  }
+}));
+
+// ---------- PAC Analyzer (no API keys) ----------
+const PAC = require('./src/pac');
+const PAC_MAX = 5 * 1024 * 1024;
+const pacText = (b) => {
+  const t = String((b && b.text) || '');
+  if (!t.trim()) throw Object.assign(new Error('Paste a PAC file, choose one, or load it from a URL.'), { status: 400 });
+  if (t.length > PAC_MAX) throw Object.assign(new Error('PAC file is larger than 5 MB.'), { status: 413 });
+  return t;
+};
+const pacWrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => res.status(e.status || 500).json({ error: e.message }));
+app.post('/api/pac/fetch', pacWrap(async (req, res) => {
+  const url = String((req.body && req.body.url) || '').trim();
+  if (!/^https?:\/\/[^\s/]+/i.test(url)) return res.status(400).json({ error: 'Enter an http:// or https:// URL.' });
+  try {
+    const text = await require('./src/zscaler').fetchText(url);
+    res.json({ url, text, bytes: Buffer.byteLength(text) });
+  } catch (e) { res.status(502).json({ error: `Couldn't download the PAC file: ${e.message}` }); }
+}));
+app.post('/api/pac/analyze', pacWrap(async (req, res) => {
+  const text = pacText(req.body);
+  res.json({ lint: PAC.lint(text), inventory: PAC.inventory(text), behaviour: PAC.behaviour(text, { myIp: req.body.myIp || undefined }) });
+}));
+// Test destinations. DNS: answers you typed win; otherwise this computer's resolver (when realDns), else "not resolvable".
+app.post('/api/pac/test', pacWrap(async (req, res) => {
+  const b = req.body || {}, text = pacText(b);
+  const items = (Array.isArray(b.urls) ? b.urls : String(b.urls || '').split(/[\s,]+/)).map((x) => String(x).trim()).filter(Boolean).slice(0, 500);
+  if (!items.length) return res.status(400).json({ error: 'Enter at least one URL or host to test.' });
+  const typed = {}; for (const [k, v] of Object.entries(b.dns || {})) typed[String(k).toLowerCase()] = v ? String(v) : null;
+  const cache = new Map();
+  const real = (h) => { if (!cache.has(h)) cache.set(h, Promise.race([dns.lookup(h, { family: 4 }).then((r) => r.address), new Promise((r) => setTimeout(() => r(null), 3000))]).catch(() => null)); return cache.get(h); };
+  const now = b.now ? Date.parse(b.now) || Date.now() : Date.now();
+  const out = [];
+  for (const raw of items) {
+    const url = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}/`;
+    let host, hostPort; try { const u = new URL(url); host = u.hostname.replace(/^\[|\]$/g, ''); hostPort = u.host; } catch { out.push({ input: raw, error: 'Not a valid URL or host' }); continue; }
+    // browsers hand the PAC only scheme://host[:port]/ for HTTPS
+    const pacUrl = /^https:/i.test(url) ? `https://${hostPort}/` : url;
+    const r = await PAC.evaluateAsync(text, pacUrl, host, { dns: typed, myIp: b.myIp || '10.0.0.10', now, resolveAsync: b.realDns ? real : null });
+    const chain = PAC.parseResult(r.result), v = PAC.verdict(chain);
+    const ret = (r.trace || []).filter((t) => t.fn === 'return').pop();
+    out.push({ input: raw, url: pacUrl, host, result: r.result == null ? null : r.result, chain, verdict: v.kind, text: v.text, line: ret ? ret.line : (r.errorLine || null),
+      trace: (r.trace || []).filter((t) => t.fn !== 'return'), dns: r.dns, error: r.error || null, asyncWarning: r.asyncWarning || null });
+  }
+  res.json({ results: out });
+}));
+// PAC files the loaded tenant uses (app profile PAC URLs, forwarding profile PACs) — only when policies are loaded.
+app.get('/api/pac/tenant', (req, res) => {
+  const s = sessions.get(req.query.sessionId);
+  if (!s || !s.snap) return res.json({ pacs: [] });
+  const d = s.snap.data, pacs = [];
+  for (const f of d.pacFetched || []) pacs.push({ name: f.url, source: (f.owners || []).join(', '), text: f.text || null, error: f.error || null });
+  for (const f of d.zccForwardingProfiles || []) for (const a of f.forwardingProfileActions || []) if (a.customPac && /FindProxyForURL/.test(a.customPac)) pacs.push({ name: `Forwarding profile "${f.name}" (${({ 0: 'On-Trusted', 1: 'VPN-Trusted', 2: 'Off-Trusted', 3: 'Split VPN-Trusted' })[a.networkType] || 'custom PAC'})`, source: 'forwarding profile', text: a.customPac });
+  res.json({ pacs });
+});
+
+const server = app.listen(PORT, HOST, () => {
   const url = `http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`;
-  console.log(`ZeroTrustPanda ZS Policy Simulator v${VERSION} running at ${url}`);
+  console.log(`Zscaler Policy Troubleshooting Toolkit (ZeroTrustPanda) v${VERSION} running at ${url}`);
   if (!process.argv.includes('--no-open') && !process.env.NO_OPEN) {
     const cmd = process.platform === 'win32' ? `start "" ${url}` : process.platform === 'darwin' ? `open ${url}` : `xdg-open ${url}`;
     exec(cmd, () => {});
   }
 }).on('error', (e) => {
-  if (e.code === 'EADDRINUSE') console.error(`Port ${PORT} is already in use — close the other copy of the simulator, or start with PORT=8788.`);
+  if (e.code === 'EADDRINUSE') console.error(`Port ${PORT} is already in use — close the other copy of the toolkit, or start with PORT=8788.`);
   else console.error(e.message);
   process.exitCode = 1;
 });
 
+app.server = server;
 module.exports = app;

@@ -1,6 +1,5 @@
 'use strict';
 // Matching primitives: wildcard domains, IPs/CIDRs/ranges, ports, URLs, PAC evaluation.
-const vm = require('vm');
 
 // ---------- IPv4 helpers ----------
 function ipToInt(ip) {
@@ -174,37 +173,15 @@ function portInRanges(port, ranges) {
 }
 
 // ---------- PAC evaluation ----------
+// Runs in the locked-down PAC runtime (src/pac.js). Throws on errors, returns the PAC's answer as a string.
 function evalPac(pacText, url, hostOverride, opts = {}) {
   const t = parseTarget(url);
-  const host = hostOverride || (t && t.host);
-  const resolve = opts.resolve || (() => (t && t.isIp ? t.host : '0.0.0.0'));
-  const myIp = opts.myIp || '10.0.0.10';
-  const sandbox = {
-    isPlainHostName: (h) => !h.includes('.'),
-    dnsDomainIs: (h, d) => h.toLowerCase().endsWith(d.toLowerCase()),
-    localHostOrDomainIs: (h, hd) => h === hd || hd.startsWith(h + '.'),
-    isResolvable: () => true,
-    isInNet: (h, pattern, mask) => {
-      const ip = isIPv4(h) ? h : resolve(h);
-      const a = ipToInt(ip), p = ipToInt(pattern), m = ipToInt(mask);
-      if (a === null || p === null || m === null) return false;
-      return ((a & m) >>> 0) === ((p & m) >>> 0);
-    },
-    dnsResolve: (h) => (isIPv4(h) ? h : resolve(h)),
-    myIpAddress: () => myIp,
-    dnsDomainLevels: (h) => h.split('.').length - 1,
-    shExpMatch: (s, g) => globToRegex2(g).test(s),
-    weekdayRange: () => true, dateRange: () => true, timeRange: () => true,
-    alert: () => {},
-  };
-  function globToRegex2(g) {
-    return new RegExp('^' + String(g).replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$');
-  }
-  const ctx = vm.createContext(sandbox);
-  vm.runInContext(pacText, ctx, { timeout: 1000 });
+  const host = hostOverride || (t && t.host) || '';
+  const resolve = opts.resolve || ((h) => (isIPv4(h) ? h : t && t.isIp ? t.host : '0.0.0.0'));
   const fullUrl = (t && t.scheme ? t.scheme : 'http') + '://' + host + (t ? t.path : '');
-  const result = vm.runInContext(`FindProxyForURL(${JSON.stringify(fullUrl)}, ${JSON.stringify(host)})`, ctx, { timeout: 1000 });
-  return String(result);
+  const r = require('./pac').evaluate(String(pacText), fullUrl, host, { resolve, myIp: opts.myIp || '10.0.0.10' });
+  if (r.error) throw new Error(r.error);
+  return String(r.result);
 }
 
 module.exports = {

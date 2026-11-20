@@ -1,0 +1,85 @@
+<!doctype html>
+<!-- ZCC Log Explorer by Alex Bonner (github.com/alexbnn/zcc-log-explorer), included with permission in the Zscaler Policy Troubleshooting Toolkit. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ZCC Log Explorer</title>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%232a78d6'/><path d='M4 4h8L4 12h8' stroke='white' stroke-width='2' fill='none'/></svg>" />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="toolkit.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">Z</span>
+        <span>ZCC Log Explorer</span>
+        <span class="brand-sub">ZPA · ZIA</span>
+      </div>
+      <div class="ds-picker">
+        <label for="dsSelect" class="sr-only">Dataset</label>
+        <select id="dsSelect"></select>
+        <button id="loadBtn" class="btn primary">Load logs</button>
+        <button id="themeBtn" class="btn ghost icon" title="Toggle theme" aria-label="Toggle theme">◐</button>
+      </div>
+    </header>
+
+    <nav class="tabs" id="tabs" role="tablist">
+      <a href="#/overview" data-view="overview">Overview</a>
+      <a href="#/timeline" data-view="timeline">Timeline</a>
+      <span class="tab-group" aria-hidden="true">ZPA</span>
+      <a href="#/sessions" data-view="sessions" aria-label="ZPA Sessions">Sessions</a>
+      <a href="#/segments" data-view="segments" aria-label="ZPA App Segments">App Segments</a>
+      <a href="#/apps" data-view="apps" aria-label="ZPA Applications">Applications</a>
+      <span class="tab-group" aria-hidden="true">ZIA</span>
+      <a href="#/zia" data-view="zia" aria-label="ZIA Tunnel">Tunnel</a>
+      <a href="#/web" data-view="web" aria-label="ZIA Web Traffic">Web Traffic</a>
+      <span class="tab-group" aria-hidden="true"></span>
+      <a href="#/errors" data-view="errors">Errors</a>
+    </nav>
+
+    <main id="view"></main>
+
+    <dialog id="loadDialog">
+      <form method="dialog" class="dialog-body" id="loadForm">
+        <h2>Load ZCC logs</h2>
+        <p class="muted">Logs are parsed by the local server and kept in memory only. Nothing leaves this machine.</p>
+
+        <div class="drop" id="dropZone" tabindex="0">
+          <strong>Drop a log bundle here</strong>
+          <span class="muted">or click to choose files: exported <code>.zip</code>, <code>ZSATunnel_*.log</code>, rotated <code>.log.zip</code></span>
+          <input type="file" id="fileInput" multiple hidden />
+        </div>
+
+        <div class="or"><span>or</span></div>
+
+        <div class="local-row">
+          <div>
+            <strong>Read logs from this machine</strong>
+            <div class="muted small" id="localDirs"></div>
+          </div>
+          <label class="small">Last
+            <select id="sinceDays">
+              <option value="0">all</option>
+              <option value="1">1 day</option>
+              <option value="3" selected>3 days</option>
+              <option value="7">7 days</option>
+            </select>
+          </label>
+          <button type="button" class="btn" id="localBtn">Load local logs</button>
+        </div>
+
+        <label class="check small"><input type="checkbox" id="includeUpm" /> Include UPM / ZDX logs (large, not ZPA related)</label>
+
+        <div id="loadStatus" class="load-status" role="status" aria-live="polite"></div>
+        <div class="dialog-actions">
+          <button class="btn ghost" value="cancel">Close</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

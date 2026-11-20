@@ -1,21 +1,30 @@
-# ZeroTrustPanda ZS Policy Simulator v1.8.9
+# Zscaler Policy Troubleshooting Toolkit v2.0.0
 
-**Would this be allowed, blocked or bypassed — and by what?** A standalone simulator that pulls your live Zscaler policy over OneAPI and evaluates a transaction across ZIA, ZPA, Client Connector and Cloud & Branch Connector the way the cloud would, in rule order, then shows the deciding rule and everything else that could change the outcome.
+*by ZeroTrustPanda. Formerly the ZeroTrustPanda ZS Policy Simulator, which is now one of four tools in it.*
 
-Companion to the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustPanda/ZTP-Policy-Wizard) — same look, same OneAPI authentication.
+One local app for working out why traffic was blocked, allowed or bypassed: **🛡️ Policy Simulator**, **📜 ZCC Log Explorer**, **📡 Packet Capture Analyzer** and **🧭 PAC Analyzer**. Only the simulator needs API credentials; the other three work offline on files you load. Everything stays on your computer, in memory.
 
 ## Downloads
 | Platform | File |
 |---|---|
-| Windows x64 | [ZTP-Policy-Simulator-1.8.9-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.9/ZTP-Policy-Simulator-1.8.9-windows-x64.zip) → `ZTP-Policy-Simulator.exe` |
-| macOS Apple Silicon | [ZTP-Policy-Simulator-1.8.9-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.9/ZTP-Policy-Simulator-1.8.9-macos-arm64.zip) |
-| macOS Intel | [ZTP-Policy-Simulator-1.8.9-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.9/ZTP-Policy-Simulator-1.8.9-macos-x64.zip) |
+| Windows x64 | [ZTP-Policy-Simulator-2.0.0-windows-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v2.0.0/ZTP-Policy-Simulator-2.0.0-windows-x64.zip) → `Zscaler-Troubleshooting-Toolkit.exe` |
+| macOS Apple Silicon | [ZTP-Policy-Simulator-2.0.0-macos-arm64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v2.0.0/ZTP-Policy-Simulator-2.0.0-macos-arm64.zip) |
+| macOS Intel | [ZTP-Policy-Simulator-2.0.0-macos-x64.zip](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v2.0.0/ZTP-Policy-Simulator-2.0.0-macos-x64.zip) |
 | Source | clone the repo, or GitHub's "Source code" download on the release |
 
-Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.9/SHA256SUMS.txt)
+Checksums: [SHA256SUMS.txt](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v2.0.0/SHA256SUMS.txt)
 
-No install, no Node.js required. Run it and it opens `http://127.0.0.1:8787`.
-macOS builds are unsigned — before first run: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`.
+No install, no Node.js required. Run it and it opens `http://127.0.0.1:8787` on the home page.
+macOS builds are unsigned — before first run: `codesign --sign - ./Zscaler-Troubleshooting-Toolkit-macos-arm64 && xattr -d com.apple.quarantine ./Zscaler-Troubleshooting-Toolkit-macos-arm64`.
+The zips keep their `ZTP-Policy-Simulator-…` names so the update prompt in 1.8.x finds them.
+
+## New in 2.0.0
+- **Renamed to the Zscaler Policy Troubleshooting Toolkit**, with a home page that opens each tool and a **Troubleshooting** section in the left menu.
+- **📜 ZCC Log Explorer** — [ZCC Log Explorer](https://github.com/alexbnn/zcc-log-explorer) by Alex Bonner, included with permission: load a Client Connector log bundle (or this computer's logs) for tunnel state, ZPA sessions, app segments and mTunnels, ZIA web traffic, errors with hints, and a searchable timeline. Windows log folder added.
+- **📡 Packet Capture Analyzer** — .pcap / .pcapng / zipped captures: conversations, DNS, TLS (SNI, certificate issuer, alerts), what went through ZIA or ZPA or direct, and the problems that stand out: certificate pinning after SSL inspection, unanswered or refused connections, DNS failures, retransmissions, MTU, QUIC. CSV export.
+- **🧭 PAC Analyzer** — open a PAC file, a URL or one your tenant uses; lint it (syntax, DNS lookups, lookalike matches, bad return values, missing bypasses for private ranges), test URLs with your client IP and DNS, and see which line decided with every check highlighted in the code.
+- **▶ Simulate** from any of the three tools fills in the Policy Simulator (with the PAC file for PAC tests) and runs it when policies are loaded.
+- **Security fix:** PAC files (from forwarding profiles, PAC URLs or pasted) used to run in a Node `vm` context that a malicious PAC could escape. They now run in a locked-down sandbox in a worker thread (no Node or network access, no code generation, time-limited, replaced if it hangs). This applies to the simulator's PAC step too.
 
 ## What it does
 **1 · Connect → 2 · Load policies → 3 · Simulate**  — one transaction, or a bulk CSV of thousands of IPs or hosts
@@ -111,6 +120,9 @@ Port from the URL scheme (hostnames assume HTTPS/443) · network service and app
 - No per-transaction log lookup: the console's transaction-log endpoints refuse API-client tokens. Use the console's Web / Firewall Insights logs for per-transaction proof.
 - ZCC field names follow the shapes verified by the Policy Wizard; report any app profile that shows "no forwarding profile linked".
 - Zscaler-managed categories whose members the API doesn't return (e.g. *Zscaler Recommended Exemptions*, *Office 365* as a URL category) match only when the URL lookup returns them; rules on them may show as not matching for those destinations.
+
+## Changes in 2.0.0
+See "New in 2.0.0" above.
 
 ## Changes in 1.8.9
 **🌐 Network path.** The Result and Decision path tabs now show where the traffic goes:

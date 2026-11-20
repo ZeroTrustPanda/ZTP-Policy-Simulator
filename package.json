@@ -1,12 +1,12 @@
 {
   "name": "ztp-policy-simulator",
-  "version": "1.8.9",
-  "description": "ZeroTrustPanda ZS Policy Simulator \u2014 standalone Zscaler policy simulator (ZIA, ZPA, Client Connector)",
+  "version": "2.0.0",
+  "description": "Zscaler Policy Troubleshooting Toolkit by ZeroTrustPanda: policy simulator (ZIA, ZPA, Client Connector), ZCC log explorer, packet capture analyzer and PAC analyzer",
   "main": "server.js",
   "bin": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/appservices.test.js test/bulk.test.js test/decision-path.test.js test/changes.test.js test/engine.test.js test/labels.test.js test/live.test.js test/load.test.js test/multimatch.test.js test/rank.test.js test/semantics.test.js test/update.test.js test/workload.test.js",
+    "test": "node --test test/appservices.test.js test/bulk.test.js test/decision-path.test.js test/changes.test.js test/engine.test.js test/labels.test.js test/live.test.js test/load.test.js test/multimatch.test.js test/pac.test.js test/pcap.test.js test/rank.test.js test/semantics.test.js test/toolkit.test.js test/update.test.js test/workload.test.js test/zcc-zia.test.js test/zcc-zpa.test.js",
     "build": "pkg . --targets node20-win-x64,node20-macos-arm64,node20-macos-x64 --no-bytecode --public --public-packages \"*\" --out-path dist"
   },
   "pkg": {

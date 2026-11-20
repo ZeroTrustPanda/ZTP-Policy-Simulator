@@ -1,8 +1,43 @@
-# 🐼 ZeroTrustPanda ZS Policy Simulator
+# 🐼 Zscaler Policy Troubleshooting Toolkit
 
-**Downloads (v1.8.9):** [Windows x64](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.9/ZTP-Policy-Simulator-1.8.9-windows-x64.zip) · [macOS Apple Silicon](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.9/ZTP-Policy-Simulator-1.8.9-macos-arm64.zip) · [macOS Intel](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.9/ZTP-Policy-Simulator-1.8.9-macos-x64.zip) · [SHA256SUMS](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v1.8.9/SHA256SUMS.txt) — all builds in [`downloads/`](downloads/). Release notes: [RELEASE_NOTES.md](RELEASE_NOTES.md) · history: [CHANGELOG.md](CHANGELOG.md)
+*by ZeroTrustPanda (formerly the ZeroTrustPanda ZS Policy Simulator)*
 
-Standalone tool that answers "would this be allowed, blocked or bypassed — and by what?" against your live Zscaler policy. Same look as the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustPanda/ZTP-Policy-Wizard).
+**Downloads (v2.0.0):** [Windows x64](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v2.0.0/ZTP-Policy-Simulator-2.0.0-windows-x64.zip) · [macOS Apple Silicon](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v2.0.0/ZTP-Policy-Simulator-2.0.0-macos-arm64.zip) · [macOS Intel](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v2.0.0/ZTP-Policy-Simulator-2.0.0-macos-x64.zip) · [SHA256SUMS](https://github.com/ZeroTrustPanda/ZTP-Policy-Simulator/raw/main/downloads/v2.0.0/SHA256SUMS.txt) — all builds in [`downloads/`](downloads/). Release notes: [RELEASE_NOTES.md](RELEASE_NOTES.md) · history: [CHANGELOG.md](CHANGELOG.md)
+
+One local app with four tools for working out why traffic was blocked, allowed or bypassed. It runs on your computer, listens on loopback only, and keeps credentials, logs, captures and PAC files in memory.
+
+| Tool | What it does | Needs |
+|---|---|---|
+| 🛡️ **Policy Simulator** | Runs a transaction through your live ZIA, ZPA, Client Connector and Cloud & Branch Connector policy and shows the deciding rule. | OneAPI credentials (or a saved snapshot, or the sample policies) |
+| 📜 **ZCC Log Explorer** | Client Connector log bundles: tunnel state, ZPA sessions, app segments and mTunnels, ZIA web traffic, errors, and a searchable timeline. | Nothing: offline |
+| 📡 **Packet Capture Analyzer** | .pcap / .pcapng / zipped captures: conversations, DNS, TLS, what went through ZIA or ZPA, and the problems that stand out. | Nothing: offline |
+| 🧭 **PAC Analyzer** | Checks a PAC file for mistakes and shows where each URL goes and which line decided. | Nothing: offline |
+
+The home page opens each tool; the left menu has the simulator's steps and a **Troubleshooting** section with the other three. Anything you find in the log explorer, a capture or a PAC test has a **▶ Simulate** button that fills in the Policy Simulator (with the PAC file, for PAC tests) and runs it once policies are loaded.
+
+## ZCC Log Explorer
+Built from [ZCC Log Explorer](https://github.com/alexbnn/zcc-log-explorer) by Alex Bonner, included with permission and themed for the toolkit. Load an exported log bundle (`.zip`, `ZSATunnel_*.log`, rotated `*.log.zip`) or read this computer's Client Connector logs (macOS `/Library/Application Support/Zscaler`, Windows `%ProgramData%\Zscaler`; override with `ZCC_LOG_DIRS`).
+- **Overview, Timeline** (every line, merged and searchable, millions of lines), **ZPA Sessions, App Segments** (with "which segment would this host:port use?"), **Applications** (mTunnels, failure reasons, setup times), **ZIA Tunnel**, **ZIA Web Traffic** (path taken, outcome, bytes) and **Errors** with troubleshooting hints.
+- **▶ Simulate policy** on ZPA applications, segment matches and ZIA web hosts.
+- Timestamps: ZCC on macOS writes the UTC clock with the local offset label, so times are read as UTC by default (`ZCC_TS_MODE=offset` to trust the label).
+
+## Packet Capture Analyzer
+Drop a `.pcap` (µs or ns, either byte order), `.pcapng` or a `.zip` containing captures (up to 1 GB). Ethernet/VLAN, Linux cooked (v1/v2), loopback and raw IP (tunnel adapter) captures are supported.
+- **What stands out:** certificates rejected by the app (unknown_ca after a Zscaler-issued certificate = pinning or missing root CA → consider an SSL Inspection *Do Not Inspect* rule), connections with no answer or refused/reset, DNS NXDOMAIN / SERVFAIL / no response, retransmissions, zero windows, MTU (ICMP frag-needed), QUIC, traffic that went direct while the rest used Zscaler, and SSL-inspected sessions.
+- **Tabs:** Conversations (filters, path, result, RTT, retransmits), DNS, TLS / HTTPS (SNI, version, ALPN, certificate issuer, alerts), and Zscaler path (ZIA Service Edges, ZPA brokers and synthetic IPs, other Zscaler services, direct).
+- How the path is decided: Zscaler names (gateway, Z-Tunnel, ZPA broker, ZDX, PAC), Zscaler IP ranges, ZPA synthetic IPs (100.64.0.0/10), and a Zscaler-issued certificate or Zscaler block page (proof the session went through ZIA).
+- Conversations download as CSV. The capture is analyzed in memory and never saved.
+
+## PAC Analyzer
+Open a PAC file, load one from a URL (e.g. your ZIA-hosted `pac.<cloud>/…` file), pick one your tenant uses (when policies are loaded), or paste it.
+- **Checks:** syntax errors, missing FindProxyForURL, repeated DNS lookups (`isInNet(host…)`, `dnsResolve`), DNS before hostname checks, `dnsDomainIs` without a leading dot (matches lookalikes), `*.domain` patterns that miss the bare domain, URL-path matching that can't work for HTTPS, invalid netmasks, malformed return values (missing `;`, no port, lower case), no DIRECT fallback, Zscaler variables (`${GATEWAY}`…) that only work when hosted in ZIA, time-dependent results, loops, very large files.
+- **How it treats the basics:** plain hostnames, private ranges, loopback and an ordinary website, with the answer and line.
+- **Test URLs** with a client IP (`myIpAddress`), date/time, typed DNS answers and/or this computer's DNS. Each result shows Zscaler / Direct / other proxy, the full answer and the line that decided; selecting it highlights every check the PAC ran (true/false) in the code.
+- The PAC runs in a locked-down sandbox: a separate worker thread with a fresh context per run, no access to Node or the network, no code generation from strings, 1 s limit, and the worker is replaced if the file leaves async code running. The Policy Simulator's PAC step uses the same sandbox.
+
+# 🛡️ Policy Simulator
+
+Answers "would this be allowed, blocked or bypassed — and by what?" against your live Zscaler policy. Same look as the [ZeroTrustPanda ZS Policy Wizard](https://github.com/ZeroTrustPanda/ZTP-Policy-Wizard).
 
 ## Flow
 1. **Connect** — OneAPI client credentials (ZIdentity vanity domain, client ID, secret). The same API client is used for ZIA, Client Connector and ZPA. Probes each one's reachability.
@@ -101,8 +136,9 @@ In the change wizard, switch to **🔒 Private application (ZPA)**. It is presel
 - **Not yet run against a live tenant:** the ZPA reads added in 1.5.0 (client forwarding policy, server groups, IdPs, SAML attributes, SCIM groups), ZPA writes (create/update segment, segment group, access rule, reorder) and Cloud App Control matching, and reading the ZPA customer ID from the OneAPI token (Zscaler doesn't document a claim for it, so the manual entry is the fallback). They follow Zscaler's API reference and the SDK conventions and are tested against the in-memory ZPA. Try them on ZTH first.
 
 ## Run
-- Windows: `ZTP-Policy-Simulator.exe` — serves http://127.0.0.1:8787 and opens your browser (`PORT`, `NO_OPEN=1` and `NO_UPDATE_CHECK=1` supported). When a newer version is on GitHub it shows an update prompt with the download for your computer.
-- macOS: `codesign --sign - ./ZTP-Policy-Simulator-macos-arm64 && xattr -d com.apple.quarantine ./ZTP-Policy-Simulator-macos-arm64`, then run it.
+- Windows: `Zscaler-Troubleshooting-Toolkit.exe` — serves http://127.0.0.1:8787 and opens your browser (`PORT`, `NO_OPEN=1` and `NO_UPDATE_CHECK=1` supported). When a newer version is on GitHub it shows an update prompt with the download for your computer.
+- macOS: `codesign --sign - ./Zscaler-Troubleshooting-Toolkit-macos-arm64 && xattr -d com.apple.quarantine ./Zscaler-Troubleshooting-Toolkit-macos-arm64`, then run it.
+- The download zips keep their `ZTP-Policy-Simulator-<version>-<platform>.zip` names so the update prompt in older versions still finds them.
 - From source: `npm install && npm start`; tests `npm test`; build `npm run build`.
 - **Try with sample policies** works with no tenant. **Save policy snapshot** (rules only, no credentials) writes to `~/ZTP-Policy-Simulator/snapshots/`; **Open saved snapshot** simulates offline.
 
@@ -113,6 +149,9 @@ In the change wizard, switch to **🔒 Private application (ZPA)**. It is presel
 
 ## Project layout
 - `server.js` — local Express server (loopback only) and API routes
+- `src/zcc/` — ZCC Log Explorer server (parser, ZPA and ZIA analyzers, error triage, API mounted at `/zcc`); `public/zcc/` — its UI
+- `src/pcap.js` — packet capture reader and analyzer; `src/zip.js` — zip reader for bundles; `public/tools/pcap.js` — its UI
+- `src/pac.js` — sandboxed PAC runtime, lint and behaviour checks; `public/tools/pac.js` — its UI
 - `src/zscaler.js` — OneAPI client and policy loader
 - `src/engine.js` — ordered rule evaluation and outcome model
 - `src/zcc.js` — Client Connector per-profile forwarding evaluation

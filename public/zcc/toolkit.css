@@ -1,0 +1,40 @@
+/* Zscaler Policy Troubleshooting Toolkit theme for the embedded ZCC Log Explorer.
+   Maps the explorer's design tokens onto the toolkit palette (navy, IBM Plex) in both of its themes. */
+:root:not(#x), :root:not(#x)[data-theme] {
+  color-scheme: dark;
+  --bg: #0a0e17;
+  --surface: #111827;
+  --surface-2: #1a2236;
+  --border: #2a3654;
+  --border-strong: #3b4a6b;
+  --text: #e8ecf4;
+  --text-2: #b4c0d6;
+  --muted: #8896b3;
+  --accent: #3b82f6;
+  --accent-ink: #ffffff;
+  --accent-soft: #1e3a8a;
+  --series-ok: #3b82f6;
+  --good: #10b981;
+  --warning: #f59e0b;
+  --serious: #f97316;
+  --critical: #ef4444;
+  --off: #475569;
+  --good-ink: #34d399;
+  --warn-ink: #fcd34d;
+  --crit-ink: #fca5a5;
+  --row-hover: #1f2943;
+  --row-sel: #1e3a8a;
+  --mono: 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace;
+  --sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --radius: 8px;
+}
+/* The toolkit header already names the tool; keep the dataset picker and Load button. */
+.topbar .brand, #themeBtn { display: none !important; }
+.topbar { justify-content: flex-end; background: var(--bg); }
+.tabs { background: var(--bg); }
+.card { border-radius: 12px; }
+.btn.primary { background: var(--accent); border-color: var(--accent); }
+.btn.sim { border-color: #0e7490; color: #67e8f9; background: rgba(6, 182, 212, .08); }
+.btn.sim:hover { background: rgba(6, 182, 212, .18); }
+dialog { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+dialog::backdrop { background: rgba(5, 8, 15, .7); }
